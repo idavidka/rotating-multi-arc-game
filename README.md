@@ -1,4 +1,4 @@
-# bounce-game
+# rotating-multi-arc-game
 
 A rotating multi-arc game built with React, TypeScript, and Vite.
 
