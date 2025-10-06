@@ -2,6 +2,10 @@
 
 A rotating multi-arc game built with React, TypeScript, and Vite.
 
+## Demo
+
+🎮 [Play the game here](https://idavidka.github.io/rotating-multi-arc-game/)
+
 ## Installation
 
 ```bash
