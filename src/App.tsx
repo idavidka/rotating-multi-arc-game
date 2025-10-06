@@ -34,15 +34,16 @@ const defaultConfig: Config = {
 export default function App() {
   const [config, setConfig] = useState(defaultConfig);
   const [running, setRunning] = useState(true);
+  const [rotationEnabled, setRotationEnabled] = useState(true); // új: csak körök forgásához
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ballsRef = useRef<{ x: number; y: number; vx: number; vy: number; r: number }[]>([]);
   const rotRef = useRef<number[]>([]);
   const lastRef = useRef(performance.now());
   const centerRef = useRef({ x: 0, y: 0 });
   const animRef = useRef<number | undefined>(undefined);
-  const spawnIndex = useRef(0);
+  const spawnQueue = useRef(0);
+  const spawnCooldown = useRef(0);
 
-  // Canvas setup
   const resize = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -50,13 +51,13 @@ export default function App() {
     canvas.height = window.innerHeight;
     centerRef.current = { x: canvas.width / 2, y: canvas.height / 2 };
   };
+
   useEffect(() => {
     resize();
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, []);
 
-  // Utility functions
   const normAngle = (a: number) => {
     a = (a + Math.PI) % (2 * Math.PI);
     if (a < 0) a += 2 * Math.PI;
@@ -78,7 +79,6 @@ export default function App() {
     b.vy *= k;
   };
 
-  // Ball creation — always vertical downward
   const createBallAtCenter = () => {
     const { x: cx, y: cy } = centerRef.current;
     return { x: cx, y: cy, vx: 0, vy: config.ballSpeed, r: config.ballRadius };
@@ -86,9 +86,11 @@ export default function App() {
 
   const resetBalls = () => {
     ballsRef.current = [];
-    spawnIndex.current = 0;
+    spawnQueue.current = 0;
+    spawnCooldown.current = 0;
   };
 
+  // ✅ stabilizált visszapattanási fizika
   const reflectFromCircle = (
     b: any,
     nx: number,
@@ -97,48 +99,43 @@ export default function App() {
     ring: { inner: number; outer: number; rot: number },
     ringAngularSpeed: number
   ) => {
-    // Determine inner or outer wall
     const innerDiff = Math.abs(dist - ring.inner);
     const outerDiff = Math.abs(dist - ring.outer);
-    let normalX = nx;
-    let normalY = ny;
 
-    if (innerDiff < outerDiff) {
-      normalX = -nx;
-      normalY = -ny;
-    }
+    // Melyik oldalhoz közelebb?
+    const isInner = innerDiff < outerDiff;
+    const normalX = isInner ? -nx : nx;
+    const normalY = isInner ? -ny : ny;
 
-    // Tangent vector (perpendicular to normal)
     const tx = -normalY;
     const ty = normalX;
 
-    // Tangential surface velocity of rotating ring
-    const tangentSpeed = ringAngularSpeed * dist; // rad/s * radius
+    // forgó kör tangenciális sebessége
+    const tangentSpeed = ringAngularSpeed * dist;
     const surfaceVx = tx * tangentSpeed;
     const surfaceVy = ty * tangentSpeed;
 
-    // Relative velocity (ball vs surface)
+    // relatív sebesség
     let rvx = b.vx - surfaceVx;
     let rvy = b.vy - surfaceVy;
-
-    // Reflect relative velocity along normal
     const dot = rvx * normalX + rvy * normalY;
-    if (dot > 0) return; // moving away
+
+    if (dot > 0) return; // csak ha közeledik
+
+    // visszaverés
     rvx -= 2 * dot * normalX;
     rvy -= 2 * dot * normalY;
 
-    // Transform back to world velocity
     b.vx = rvx + surfaceVx;
     b.vy = rvy + surfaceVy;
 
-    // Add a fraction of tangential velocity to emphasize "kick" effect
-    const kickStrength = 0.6; // 0 = no kick, 1 = full transfer
+    // kis "kick" a forgás miatt
+    const kickStrength = 0.6;
     b.vx += tx * tangentSpeed * kickStrength * 0.5;
     b.vy += ty * tangentSpeed * kickStrength * 0.5;
 
     normalizeSpeed(b);
   };
-
 
   const collideBalls = (a: any, b: any) => {
     const dx = b.x - a.x;
@@ -168,14 +165,13 @@ export default function App() {
     }
   };
 
-  // Restart handler
   const restartSimulation = () => {
     resetBalls();
     rotRef.current = [];
     setRunning(true);
   };
 
-  // Main loop
+  // ✅ fő loop
   const loop = (now: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -187,7 +183,7 @@ export default function App() {
 
     const { x: cx, y: cy } = centerRef.current;
     const baseR = config.baseDiameter / 2;
-    const spacing = config.ballRadius * 3 * 2;
+    const spacing = config.ballRadius * 5 * 2;
     const gapRad = (config.gapDegrees * Math.PI) / 180 / 2;
     const halfThickness = config.circleThickness / 2;
 
@@ -196,9 +192,10 @@ export default function App() {
     rotRef.current = rotRef.current.length ? rotRef.current : Array(config.circleCount).fill(0);
     const rings: { inner: number; outer: number; rot: number }[] = [];
 
+    // Forgás csak ha engedélyezve van
     for (let i = 0; i < config.circleCount; i++) {
       const circ = config.circles[i] || config.circles[0];
-      rotRef.current[i] += circ.rotationSpeed * circ.direction * dt;
+      if (rotationEnabled) rotRef.current[i] += circ.rotationSpeed * circ.direction * dt;
       const R = baseR + i * spacing;
       rings.push({ inner: R - halfThickness, outer: R + halfThickness, rot: rotRef.current[i] });
 
@@ -215,17 +212,22 @@ export default function App() {
 
     const balls = ballsRef.current;
 
-    // Spawn logic — next ball only after previous fell one diameter
-    if (spawnIndex.current < config.initialBalls) {
+    // Spawn logic — sequential
+    if (spawnCooldown.current <= 0 && spawnQueue.current > 0) {
       const last = balls[balls.length - 1];
       const lastDist = last ? Math.abs(last.y - cy) : Infinity;
       if (!last || lastDist > config.ballRadius * 2) {
         balls.push(createBallAtCenter());
-        spawnIndex.current++;
+        spawnQueue.current--;
+        spawnCooldown.current = 0.05;
       }
+    } else { spawnCooldown.current -= dt; }
+
+    if (balls.length < config.initialBalls && spawnQueue.current === 0) {
+      spawnQueue.current = config.initialBalls - balls.length;
     }
 
-    // Movement + collisions
+    // --- Physics ---
     for (const b of balls) {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
@@ -236,44 +238,44 @@ export default function App() {
       const nx = dx / dist;
       const ny = dy / dist;
 
-      rings.forEach((ring) => {
+      rings.forEach((ring, ringIndex) => {
+        const circ = config.circles[ringIndex] || config.circles[0];
+        const angularSpeed = rotationEnabled
+          ? circ.rotationSpeed * circ.direction
+          : 0; // rotation toggle
         const inGap = isInGap(b.x, b.y, ring.rot, config.gapDegrees);
+
         if (!inGap) {
           const innerEdge = ring.inner - b.r;
           const outerEdge = ring.outer + b.r;
-          if (dist > innerEdge && dist < outerEdge) {
-            const circ = config.circles[rings.indexOf(ring)] || config.circles[0];
-            const angularSpeed = circ.rotationSpeed * circ.direction * 0.5; // radians/sec
-            reflectFromCircle(b, nx, ny, dist, ring, angularSpeed);
 
-            if (Math.abs(dist - innerEdge) < Math.abs(dist - outerEdge))
-              b.x = cx + nx * (innerEdge - 0.5);
-            else b.x = cx + nx * (outerEdge + 0.5);
-            b.y = cy + ny * (
-              Math.abs(dist - innerEdge) < Math.abs(dist - outerEdge)
-                ? innerEdge - 0.5
-                : outerEdge + 0.5
-            );
+          // csak pontosan a gyűrű falától pattanjon
+          if (dist > innerEdge && dist < outerEdge) {
+            reflectFromCircle(b, nx, ny, dist, ring, angularSpeed);
+            const target = Math.abs(dist - innerEdge) < Math.abs(dist - outerEdge)
+              ? innerEdge - 0.5
+              : outerEdge + 0.5;
+            b.x = cx + nx * target;
+            b.y = cy + ny * target;
           }
         }
       });
     }
 
-    // Ball–ball collisions
-    for (let i = 0; i < balls.length; i++) {
+    // --- Collisions between balls ---
+    for (let i = 0; i < balls.length; i++)
       for (let j = i + 1; j < balls.length; j++) collideBalls(balls[i], balls[j]);
-    }
 
-    // Escape: if ball leaves the canvas → spawn new ones
+    // --- Escape ---
     for (let i = balls.length - 1; i >= 0; i--) {
       const b = balls[i];
       if (b.x < -b.r || b.y < -b.r || b.x > canvas.width + b.r || b.y > canvas.height + b.r) {
         balls.splice(i, 1);
-        for (let k = 0; k < config.ballsOnEscape; k++) balls.push(createBallAtCenter());
+        spawnQueue.current += config.ballsOnEscape;
       }
     }
 
-    // Draw balls
+    // --- Draw balls ---
     ctx.fillStyle = "#fff";
     for (const b of balls) {
       ctx.beginPath();
@@ -292,7 +294,7 @@ export default function App() {
     return () => {
       if (animRef.current) cancelAnimationFrame(animRef.current);
     };
-  }, [running, config]);
+  }, [running, config, rotationEnabled]);
 
   // Config update
   const updateConfig = (key: keyof Config, val: number) =>
@@ -329,7 +331,7 @@ export default function App() {
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
       <canvas ref={canvasRef} style={{ background: "#0a0f0a" }} />
 
-      <fieldset style={{ background: "#111", color: "#ccc", padding: 10, borderRadius: 6 }}>
+      <fieldset style={{ display: "flex", flexDirection: "row", gap: 10, flexWrap: "wrap", background: "#111", color: "#ccc", padding: 10, borderRadius: 6 }}>
         <label>Inner circle diameter
           <input type="range" min={200} max={800} step={10}
             value={config.baseDiameter}
@@ -405,18 +407,50 @@ export default function App() {
         </div>
       </fieldset>
 
-      <button onClick={() => setRunning((r) => !r)}
-        style={{
-          marginTop: 6,
-          padding: "6px 14px",
-          border: "none",
-          borderRadius: 6,
-          background: running ? "#c33" : "#eee",
-          color: running ? "#fff" : "#111",
-          fontWeight: 600
-        }}>
-        {running ? "Stop" : "Start"}
-      </button>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          onClick={() => setRunning((r) => !r)}
+          style={{
+            padding: "6px 14px",
+            border: "none",
+            borderRadius: 6,
+            background: running ? "#c33" : "#eee",
+            color: running ? "#fff" : "#111",
+            fontWeight: 600,
+          }}
+        >
+          {running ? "Stop" : "Start"}
+        </button>
+
+        <button
+          onClick={() => setRotationEnabled((v) => !v)}
+          style={{
+            padding: "6px 14px",
+            border: "none",
+            borderRadius: 6,
+            background: rotationEnabled ? "#39f" : "#999",
+            color: "#fff",
+            fontWeight: 600,
+          }}
+        >
+          {rotationEnabled ? "Stop Rotation" : "Start Rotation"}
+        </button>
+
+        <button
+          onClick={restartSimulation}
+          style={{
+            padding: "6px 14px",
+            border: "none",
+            borderRadius: 6,
+            background: "#3a8",
+            color: "#fff",
+            fontWeight: 600,
+          }}
+        >
+          Restart
+        </button>
+      </div>
 
       <div style={{ fontSize: 14, opacity: 0.8 }}>Balls: {ballsRef.current.length}</div>
     </div>
