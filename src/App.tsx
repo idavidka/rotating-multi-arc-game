@@ -18,8 +18,8 @@ type Config = {
 
 const defaultConfig: Config = {
   baseDiameter: 400,
-  initialBalls: 1,
-  circleCount: 3,
+  initialBalls: 2,
+  circleCount: 2,
   gapDegrees: 40,
   ballsOnEscape: 2,
   ballRadius: 6,
@@ -28,7 +28,6 @@ const defaultConfig: Config = {
   circles: [
     { rotationSpeed: 1.2, direction: 1 },
     { rotationSpeed: 0.8, direction: -1 },
-    { rotationSpeed: 1.5, direction: 1 },
   ],
 };
 
@@ -71,7 +70,6 @@ export default function App() {
     return Math.abs(normAngle(a - rot)) <= half;
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const normalizeSpeed = (b: any) => {
     const s = Math.hypot(b.vx, b.vy);
     if (s === 0) return;
@@ -80,24 +78,68 @@ export default function App() {
     b.vy *= k;
   };
 
-  // Ball creation
+  // Ball creation — always vertical downward
   const createBallAtCenter = () => {
     const { x: cx, y: cy } = centerRef.current;
-    const angle = Math.PI / 2 + (Math.random() - 0.5) * 0.2;
-    const vx = Math.cos(angle) * config.ballSpeed;
-    const vy = Math.sin(angle) * config.ballSpeed;
-    return { x: cx, y: cy, vx, vy, r: config.ballRadius };
+    return { x: cx, y: cy, vx: 0, vy: config.ballSpeed, r: config.ballRadius };
   };
 
   const resetBalls = () => {
     ballsRef.current = [];
     spawnIndex.current = 0;
   };
-  useEffect(() => {
-    resetBalls();
-  }, [config.initialBalls]);
 
-  // Collision helpers
+  const reflectFromCircle = (
+    b: any,
+    nx: number,
+    ny: number,
+    dist: number,
+    ring: { inner: number; outer: number; rot: number },
+    ringAngularSpeed: number
+  ) => {
+    // Determine inner or outer wall
+    const innerDiff = Math.abs(dist - ring.inner);
+    const outerDiff = Math.abs(dist - ring.outer);
+    let normalX = nx;
+    let normalY = ny;
+
+    if (innerDiff < outerDiff) {
+      normalX = -nx;
+      normalY = -ny;
+    }
+
+    // Tangent vector (perpendicular to normal)
+    const tx = -normalY;
+    const ty = normalX;
+
+    // Tangential surface velocity of rotating ring
+    const tangentSpeed = ringAngularSpeed * dist; // rad/s * radius
+    const surfaceVx = tx * tangentSpeed;
+    const surfaceVy = ty * tangentSpeed;
+
+    // Relative velocity (ball vs surface)
+    let rvx = b.vx - surfaceVx;
+    let rvy = b.vy - surfaceVy;
+
+    // Reflect relative velocity along normal
+    const dot = rvx * normalX + rvy * normalY;
+    if (dot > 0) return; // moving away
+    rvx -= 2 * dot * normalX;
+    rvy -= 2 * dot * normalY;
+
+    // Transform back to world velocity
+    b.vx = rvx + surfaceVx;
+    b.vy = rvy + surfaceVy;
+
+    // Add a fraction of tangential velocity to emphasize "kick" effect
+    const kickStrength = 0.6; // 0 = no kick, 1 = full transfer
+    b.vx += tx * tangentSpeed * kickStrength * 0.5;
+    b.vy += ty * tangentSpeed * kickStrength * 0.5;
+
+    normalizeSpeed(b);
+  };
+
+
   const collideBalls = (a: any, b: any) => {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
@@ -111,7 +153,6 @@ export default function App() {
       a.y -= ny * overlap;
       b.x += nx * overlap;
       b.y += ny * overlap;
-
       const vaDotN = a.vx * nx + a.vy * ny;
       const vbDotN = b.vx * nx + b.vy * ny;
       const vaNewX = a.vx + (vbDotN - vaDotN) * nx;
@@ -122,17 +163,16 @@ export default function App() {
       a.vy = vaNewY;
       b.vx = vbNewX;
       b.vy = vbNewY;
-
       normalizeSpeed(a);
       normalizeSpeed(b);
     }
   };
 
-  const reflectFromCircle = (b: any, nx: number, ny: number) => {
-    const dot = b.vx * nx + b.vy * ny;
-    b.vx -= 2 * dot * nx;
-    b.vy -= 2 * dot * ny;
-    normalizeSpeed(b);
+  // Restart handler
+  const restartSimulation = () => {
+    resetBalls();
+    rotRef.current = [];
+    setRunning(true);
   };
 
   // Main loop
@@ -175,11 +215,11 @@ export default function App() {
 
     const balls = ballsRef.current;
 
-    // Ball spawn
+    // Spawn logic — next ball only after previous fell one diameter
     if (spawnIndex.current < config.initialBalls) {
       const last = balls[balls.length - 1];
-      const distFromCenter = last ? Math.hypot(last.x - cx, last.y - cy) : Infinity;
-      if (!last || distFromCenter > config.ballRadius * 2) {
+      const lastDist = last ? Math.abs(last.y - cy) : Infinity;
+      if (!last || lastDist > config.ballRadius * 2) {
         balls.push(createBallAtCenter());
         spawnIndex.current++;
       }
@@ -187,7 +227,6 @@ export default function App() {
 
     // Movement + collisions
     for (const b of balls) {
-      const oldX = b.x, oldY = b.y;
       b.x += b.vx * dt;
       b.y += b.vy * dt;
 
@@ -197,23 +236,19 @@ export default function App() {
       const nx = dx / dist;
       const ny = dy / dist;
 
-      rings.forEach((ring, ringIndex) => {
-        const allowEscape = ringIndex === 0;
+      rings.forEach((ring) => {
         const inGap = isInGap(b.x, b.y, ring.rot, config.gapDegrees);
-
-        // Outer rings are solid; inner ring has an opening
-        if (!allowEscape || !inGap) {
+        if (!inGap) {
           const innerEdge = ring.inner - b.r;
           const outerEdge = ring.outer + b.r;
-
           if (dist > innerEdge && dist < outerEdge) {
-            reflectFromCircle(b, nx, ny);
+            const circ = config.circles[rings.indexOf(ring)] || config.circles[0];
+            const angularSpeed = circ.rotationSpeed * circ.direction * 0.5; // radians/sec
+            reflectFromCircle(b, nx, ny, dist, ring, angularSpeed);
 
             if (Math.abs(dist - innerEdge) < Math.abs(dist - outerEdge))
               b.x = cx + nx * (innerEdge - 0.5);
-            else
-              b.x = cx + nx * (outerEdge + 0.5);
-
+            else b.x = cx + nx * (outerEdge + 0.5);
             b.y = cy + ny * (
               Math.abs(dist - innerEdge) < Math.abs(dist - outerEdge)
                 ? innerEdge - 0.5
@@ -232,15 +267,9 @@ export default function App() {
     // Escape: if ball leaves the canvas → spawn new ones
     for (let i = balls.length - 1; i >= 0; i--) {
       const b = balls[i];
-      if (
-        b.x < -b.r ||
-        b.y < -b.r ||
-        b.x > canvas.width + b.r ||
-        b.y > canvas.height + b.r
-      ) {
+      if (b.x < -b.r || b.y < -b.r || b.x > canvas.width + b.r || b.y > canvas.height + b.r) {
         balls.splice(i, 1);
-        for (let k = 0; k < config.ballsOnEscape; k++)
-          balls.push(createBallAtCenter());
+        for (let k = 0; k < config.ballsOnEscape; k++) balls.push(createBallAtCenter());
       }
     }
 
