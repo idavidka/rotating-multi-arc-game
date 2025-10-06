@@ -19,7 +19,7 @@ type Config = {
 const defaultConfig: Config = {
   baseDiameter: 400,
   initialBalls: 2,
-  circleCount: 2,
+  circleCount: 3,
   gapDegrees: 40,
   ballsOnEscape: 2,
   ballRadius: 6,
@@ -28,13 +28,14 @@ const defaultConfig: Config = {
   circles: [
     { rotationSpeed: 1.2, direction: 1 },
     { rotationSpeed: 0.8, direction: -1 },
+    { rotationSpeed: 1.5, direction: 1 },
   ],
 };
 
 export default function App() {
   const [config, setConfig] = useState(defaultConfig);
   const [running, setRunning] = useState(true);
-  const [rotationEnabled, setRotationEnabled] = useState(true); // új: csak körök forgásához
+  const [rotationEnabled, setRotationEnabled] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ballsRef = useRef<{ x: number; y: number; vx: number; vy: number; r: number }[]>([]);
   const rotRef = useRef<number[]>([]);
@@ -43,21 +44,36 @@ export default function App() {
   const animRef = useRef<number | undefined>(undefined);
   const spawnQueue = useRef(0);
   const spawnCooldown = useRef(0);
+  const canvasSize = useRef(0);
+
+  // --- Compute required canvas size based on largest circle ---
+  const computeCanvasSize = () => {
+    const spacing = config.ballRadius * 5 * 2;
+    const largestRadius =
+      config.baseDiameter / 2 +
+      (9) * spacing +
+      config.circleThickness / 2;
+    const margin = 50;
+    return Math.ceil(largestRadius * 2 + margin);
+  };
 
   const resize = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    centerRef.current = { x: canvas.width / 2, y: canvas.height / 2 };
+    const size = computeCanvasSize();
+    canvas.width = size;
+    canvas.height = size;
+    canvasSize.current = size;
+    centerRef.current = { x: size / 2, y: size / 2 };
   };
 
   useEffect(() => {
     resize();
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
-  }, []);
+  }, [config]);
 
+  // --- Utility ---
   const normAngle = (a: number) => {
     a = (a + Math.PI) % (2 * Math.PI);
     if (a < 0) a += 2 * Math.PI;
@@ -90,7 +106,6 @@ export default function App() {
     spawnCooldown.current = 0;
   };
 
-  // ✅ stabilizált visszapattanási fizika
   const reflectFromCircle = (
     b: any,
     nx: number,
@@ -101,28 +116,21 @@ export default function App() {
   ) => {
     const innerDiff = Math.abs(dist - ring.inner);
     const outerDiff = Math.abs(dist - ring.outer);
-
-    // Melyik oldalhoz közelebb?
     const isInner = innerDiff < outerDiff;
     const normalX = isInner ? -nx : nx;
     const normalY = isInner ? -ny : ny;
-
     const tx = -normalY;
     const ty = normalX;
 
-    // forgó kör tangenciális sebessége
     const tangentSpeed = ringAngularSpeed * dist;
     const surfaceVx = tx * tangentSpeed;
     const surfaceVy = ty * tangentSpeed;
 
-    // relatív sebesség
     let rvx = b.vx - surfaceVx;
     let rvy = b.vy - surfaceVy;
     const dot = rvx * normalX + rvy * normalY;
+    if (dot > 0) return;
 
-    if (dot > 0) return; // csak ha közeledik
-
-    // visszaverés
     rvx -= 2 * dot * normalX;
     rvy -= 2 * dot * normalY;
 
@@ -171,7 +179,7 @@ export default function App() {
     setRunning(true);
   };
 
-  // ✅ fő loop
+  // --- Main loop ---
   const loop = (now: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -182,17 +190,17 @@ export default function App() {
     lastRef.current = now;
 
     const { x: cx, y: cy } = centerRef.current;
-    const baseR = config.baseDiameter / 2;
+    const size = canvasSize.current;
     const spacing = config.ballRadius * 5 * 2;
+    const baseR = config.baseDiameter / 2;
     const gapRad = (config.gapDegrees * Math.PI) / 180 / 2;
     const halfThickness = config.circleThickness / 2;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, size, size);
 
     rotRef.current = rotRef.current.length ? rotRef.current : Array(config.circleCount).fill(0);
     const rings: { inner: number; outer: number; rot: number }[] = [];
 
-    // Forgás csak ha engedélyezve van
     for (let i = 0; i < config.circleCount; i++) {
       const circ = config.circles[i] || config.circles[0];
       if (rotationEnabled) rotRef.current[i] += circ.rotationSpeed * circ.direction * dt;
@@ -212,7 +220,7 @@ export default function App() {
 
     const balls = ballsRef.current;
 
-    // Spawn logic — sequential
+    // Sequential spawn
     if (spawnCooldown.current <= 0 && spawnQueue.current > 0) {
       const last = balls[balls.length - 1];
       const lastDist = last ? Math.abs(last.y - cy) : Infinity;
@@ -221,13 +229,12 @@ export default function App() {
         spawnQueue.current--;
         spawnCooldown.current = 0.05;
       }
-    } else { spawnCooldown.current -= dt; }
+    } else spawnCooldown.current -= dt;
 
-    if (balls.length < config.initialBalls && spawnQueue.current === 0) {
+    if (balls.length < config.initialBalls && spawnQueue.current === 0)
       spawnQueue.current = config.initialBalls - balls.length;
-    }
 
-    // --- Physics ---
+    // Movement + collisions
     for (const b of balls) {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
@@ -240,21 +247,17 @@ export default function App() {
 
       rings.forEach((ring, ringIndex) => {
         const circ = config.circles[ringIndex] || config.circles[0];
-        const angularSpeed = rotationEnabled
-          ? circ.rotationSpeed * circ.direction
-          : 0; // rotation toggle
+        const angularSpeed = rotationEnabled ? circ.rotationSpeed * circ.direction : 0;
         const inGap = isInGap(b.x, b.y, ring.rot, config.gapDegrees);
-
         if (!inGap) {
           const innerEdge = ring.inner - b.r;
           const outerEdge = ring.outer + b.r;
-
-          // csak pontosan a gyűrű falától pattanjon
           if (dist > innerEdge && dist < outerEdge) {
             reflectFromCircle(b, nx, ny, dist, ring, angularSpeed);
-            const target = Math.abs(dist - innerEdge) < Math.abs(dist - outerEdge)
-              ? innerEdge - 0.5
-              : outerEdge + 0.5;
+            const target =
+              Math.abs(dist - innerEdge) < Math.abs(dist - outerEdge)
+                ? innerEdge - 0.5
+                : outerEdge + 0.5;
             b.x = cx + nx * target;
             b.y = cy + ny * target;
           }
@@ -262,20 +265,20 @@ export default function App() {
       });
     }
 
-    // --- Collisions between balls ---
+    // Ball collisions
     for (let i = 0; i < balls.length; i++)
       for (let j = i + 1; j < balls.length; j++) collideBalls(balls[i], balls[j]);
 
-    // --- Escape ---
+    // Escape + respawn
     for (let i = balls.length - 1; i >= 0; i--) {
       const b = balls[i];
-      if (b.x < -b.r || b.y < -b.r || b.x > canvas.width + b.r || b.y > canvas.height + b.r) {
+      if (b.x < -b.r || b.y < -b.r || b.x > size + b.r || b.y > size + b.r) {
         balls.splice(i, 1);
         spawnQueue.current += config.ballsOnEscape;
       }
     }
 
-    // --- Draw balls ---
+    // Draw balls
     ctx.fillStyle = "#fff";
     for (const b of balls) {
       ctx.beginPath();
@@ -452,6 +455,7 @@ export default function App() {
         </button>
       </div>
 
+      <div style={{ fontSize: 14, opacity: 0.8 }}>Canvas: {canvasSize.current}px</div>
       <div style={{ fontSize: 14, opacity: 0.8 }}>Balls: {ballsRef.current.length}</div>
     </div>
   );
