@@ -12,6 +12,7 @@ type Config = {
   ballRadius: number;
   ballSpeed: number;
   circleThickness: number;
+  kickStrength: number;
   circles: CircleConfig[];
 };
 
@@ -24,6 +25,7 @@ const defaultConfig: Config = {
   ballRadius: 6,
   ballSpeed: 250,
   circleThickness: 10,
+  kickStrength: 0.6,
   circles: [
     { rotationSpeed: 1.2, direction: 1 },
     { rotationSpeed: 0.8, direction: -1 },
@@ -111,7 +113,8 @@ export default function App() {
     ny: number,
     dist: number,
     ring: { inner: number; outer: number; rot: number },
-    ringAngularSpeed: number
+    ringAngularSpeed: number,
+    kickStrength: number
   ) => {
     const innerDiff = Math.abs(dist - ring.inner);
     const outerDiff = Math.abs(dist - ring.outer);
@@ -137,7 +140,6 @@ export default function App() {
     b.vy = rvy + surfaceVy;
 
     // kis "kick" a forgás miatt
-    const kickStrength = 0.6;
     b.vx += tx * tangentSpeed * kickStrength * 0.5;
     b.vy += ty * tangentSpeed * kickStrength * 0.5;
 
@@ -252,7 +254,7 @@ export default function App() {
           const innerEdge = ring.inner - b.r;
           const outerEdge = ring.outer + b.r;
           if (dist > innerEdge && dist < outerEdge) {
-            reflectFromCircle(b, nx, ny, dist, ring, angularSpeed);
+            reflectFromCircle(b, nx, ny, dist, ring, angularSpeed, config.kickStrength);
             const target =
               Math.abs(dist - innerEdge) < Math.abs(dist - outerEdge)
                 ? innerEdge - 0.5
@@ -381,6 +383,12 @@ export default function App() {
             value={config.circleThickness}
             onChange={(e) => updateConfig("circleThickness", parseFloat(e.target.value))} />
           <span>{config.circleThickness}</span>
+        </label>
+        <label>Kick strength
+          <input type="range" min={0} max={2} step={0.1}
+            value={config.kickStrength}
+            onChange={(e) => updateConfig("kickStrength", parseFloat(e.target.value))} />
+          <span>{config.kickStrength.toFixed(1)}</span>
         </label>
       </fieldset>
 
