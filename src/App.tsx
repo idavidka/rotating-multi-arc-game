@@ -332,10 +332,10 @@ export default function App() {
 
   // UI
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-      <canvas ref={canvasRef} style={{ background: "#0a0f0a" }} />
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, width: "100%", maxWidth: "100vw", boxSizing: "border-box" }}>
+      <canvas ref={canvasRef} style={{ background: "#0a0f0a", maxWidth: "100%", maxHeight: "calc(100vh - 300px)", height: "auto", width: "auto", display: "block" }} />
 
-      <fieldset style={{ display: "flex", flexDirection: "row", gap: 10, flexWrap: "wrap", background: "#111", color: "#ccc", padding: 10, borderRadius: 6 }}>
+      <fieldset style={{ display: "flex", flexDirection: "row", gap: 10, flexWrap: "wrap", background: "#111", color: "#ccc", padding: 10, borderRadius: 6, maxWidth: "100%", boxSizing: "border-box" }}>
         <label>Inner circle diameter
           <input type="range" min={200} max={800} step={10}
             value={config.baseDiameter}
@@ -392,7 +392,7 @@ export default function App() {
         </label>
       </fieldset>
 
-      <fieldset style={{ background: "#111", color: "#ccc", width: "min(400px, 90vw)" }}>
+      <fieldset style={{ background: "#111", color: "#ccc", width: "min(400px, calc(100vw - 2rem))", boxSizing: "border-box" }}>
         <legend>Circles</legend>
         {Array.from({ length: config.circleCount }).map((_, i) => {
           const circ = config.circles[i] || config.circles[0];
