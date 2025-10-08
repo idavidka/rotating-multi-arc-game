@@ -12,6 +12,8 @@ type Config = {
   ballSpeed: number;
   circleThickness: number;
   kickStrength: number;
+  enableSuperBalls: boolean;
+  shockWaveStrength: number;
   circles: CircleConfig[];
 };
 
@@ -24,6 +26,8 @@ const defaultConfig: Config = {
   ballSpeed: 250,
   circleThickness: 10,
   kickStrength: 0.6,
+  enableSuperBalls: true,
+  shockWaveStrength: 300,
   circles: [
     {
       rotationSpeed: 1.2, direction: 1, gapDegrees: 40,
@@ -45,7 +49,7 @@ export default function App() {
   const [running, setRunning] = useState(true);
   const [rotationEnabled, setRotationEnabled] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const ballsRef = useRef<{ x: number; y: number; vx: number; vy: number; r: number }[]>([]);
+  const ballsRef = useRef<{ x: number; y: number; vx: number; vy: number; r: number; isSuper?: boolean; color?: string }[]>([]);
   const rotRef = useRef<number[]>([]);
   const lastRef = useRef(performance.now());
   const centerRef = useRef({ x: 0, y: 0 });
@@ -106,7 +110,10 @@ export default function App() {
 
   const createBallAtCenter = () => {
     const { x: cx, y: cy } = centerRef.current;
-    return { x: cx, y: cy, vx: 0, vy: config.ballSpeed, r: config.ballRadius };
+    const isSuper = config.enableSuperBalls && totalBallsCreated.current % 10 === 9;
+    const radius = isSuper ? config.ballRadius * 2 : config.ballRadius;
+    const color = isSuper ? "#ff0000" : "#ffffff";
+    return { x: cx, y: cy, vx: 0, vy: config.ballSpeed, r: radius, isSuper, color };
   };
 
   const resetBalls = () => {
@@ -114,6 +121,32 @@ export default function App() {
     spawnQueue.current = 0;
     spawnCooldown.current = 0;
     totalBallsCreated.current = 0;
+  };
+
+  const applyShockWave = (epicenterX: number, epicenterY: number) => {
+    const balls = ballsRef.current;
+    for (const b of balls) {
+      if (b.isSuper) continue; // Don't affect super balls (which will be removed anyway)
+      
+      const dx = b.x - epicenterX;
+      const dy = b.y - epicenterY;
+      const dist = Math.hypot(dx, dy);
+      
+      // Apply force inversely proportional to distance
+      // Stronger force closer to epicenter
+      if (dist > 0 && dist < 300) { // Max shock wave radius
+        const force = config.shockWaveStrength / (dist + 1); // +1 to avoid division by zero
+        const nx = dx / dist;
+        const ny = dy / dist;
+        
+        // Apply force towards epicenter (pulling effect)
+        b.vx -= nx * force;
+        b.vy -= ny * force;
+        
+        // Normalize speed to maintain constant speed
+        normalizeSpeed(b);
+      }
+    }
   };
 
   const reflectFromCircle = (
@@ -124,7 +157,7 @@ export default function App() {
     ring: { inner: number; outer: number; rot: number },
     ringAngularSpeed: number,
     kickStrength: number
-  ) => {
+  ): boolean => {
     const innerDiff = Math.abs(dist - ring.inner);
     const outerDiff = Math.abs(dist - ring.outer);
     const isInner = innerDiff < outerDiff;
@@ -140,7 +173,7 @@ export default function App() {
     let rvx = b.vx - surfaceVx;
     let rvy = b.vy - surfaceVy;
     const dot = rvx * normalX + rvy * normalY;
-    if (dot > 0) return;
+    if (dot > 0) return false;
 
     rvx -= 2 * dot * normalX;
     rvy -= 2 * dot * normalY;
@@ -153,6 +186,7 @@ export default function App() {
     b.vy += ty * tangentSpeed * kickStrength * 0.5;
 
     normalizeSpeed(b);
+    return true;
   };
 
   const checkGapEdgeCollision = (
@@ -342,6 +376,8 @@ export default function App() {
       spawnQueue.current = config.initialBalls - balls.length;
 
     // Movement + collisions
+    const ballsToExplode: { x: number; y: number }[] = [];
+    
     for (const b of balls) {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
@@ -360,7 +396,11 @@ export default function App() {
           const innerEdge = ring.inner - b.r;
           const outerEdge = ring.outer + b.r;
           if (dist > innerEdge && dist < outerEdge) {
-            reflectFromCircle(b, nx, ny, dist, ring, angularSpeed, config.kickStrength);
+            const collided = reflectFromCircle(b, nx, ny, dist, ring, angularSpeed, config.kickStrength);
+            if (collided && b.isSuper) {
+              // Super ball explodes on collision with circle
+              ballsToExplode.push({ x: b.x, y: b.y });
+            }
             const target =
               Math.abs(dist - innerEdge) < Math.abs(dist - outerEdge)
                 ? innerEdge - 0.5
@@ -370,7 +410,11 @@ export default function App() {
           }
         } else {
           // Check for collision with gap edges
-          checkGapEdgeCollision(b, ring, circ.gapDegrees, angularSpeed);
+          const edgeCollided = checkGapEdgeCollision(b, ring, circ.gapDegrees, angularSpeed);
+          if (edgeCollided && b.isSuper) {
+            // Super ball explodes on collision with gap edge
+            ballsToExplode.push({ x: b.x, y: b.y });
+          }
         }
       });
     }
@@ -378,6 +422,23 @@ export default function App() {
     // Ball collisions
     for (let i = 0; i < balls.length; i++)
       for (let j = i + 1; j < balls.length; j++) collideBalls(balls[i], balls[j]);
+
+    // Handle super ball explosions
+    if (ballsToExplode.length > 0) {
+      // Apply shock waves
+      for (const explosion of ballsToExplode) {
+        applyShockWave(explosion.x, explosion.y);
+      }
+      
+      // Remove exploded super balls
+      for (let i = balls.length - 1; i >= 0; i--) {
+        if (balls[i].isSuper && ballsToExplode.some(e => 
+          Math.hypot(balls[i].x - e.x, balls[i].y - e.y) < 1
+        )) {
+          balls.splice(i, 1);
+        }
+      }
+    }
 
     // Escape + respawn
     for (let i = balls.length - 1; i >= 0; i--) {
@@ -389,8 +450,8 @@ export default function App() {
     }
 
     // Draw balls
-    ctx.fillStyle = "#fff";
     for (const b of balls) {
+      ctx.fillStyle = b.color || "#fff";
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
       ctx.fill();
@@ -506,6 +567,19 @@ export default function App() {
             value={config.kickStrength}
             onChange={(e) => updateConfig("kickStrength", parseFloat(e.target.value))} />
           <span>{config.kickStrength.toFixed(1)}</span>
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          Enable super balls
+          <input type="checkbox"
+            checked={config.enableSuperBalls}
+            onChange={(e) => setConfig((c) => ({ ...c, enableSuperBalls: e.target.checked }))} />
+        </label>
+        <label>Shock wave strength
+          <input type="range" min={0} max={1000} step={50}
+            value={config.shockWaveStrength}
+            onChange={(e) => updateConfig("shockWaveStrength", parseFloat(e.target.value))}
+            disabled={!config.enableSuperBalls} />
+          <span>{config.shockWaveStrength}</span>
         </label>
       </fieldset>
 
