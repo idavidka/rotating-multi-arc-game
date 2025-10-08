@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from "react";
 
-type CircleConfig = { rotationSpeed: number; direction: 1 | -1; gapDegrees: number };
+type CircleConfig = { rotationSpeed: number; direction: 1 | -1; gapDegrees: number, angle: number };
 
 type Config = {
   baseDiameter: number;
@@ -14,6 +14,7 @@ type Config = {
   circleThickness: number;
   kickStrength: number;
   circles: CircleConfig[];
+  mode: '2D' | '3D';
 };
 
 const defaultConfig: Config = {
@@ -27,10 +28,195 @@ const defaultConfig: Config = {
   circleThickness: 10,
   kickStrength: 0.6,
   circles: [
-    { rotationSpeed: 1.2, direction: 1, gapDegrees: 40 },
-    { rotationSpeed: 0.8, direction: -1, gapDegrees: 40 },
-    { rotationSpeed: 1.5, direction: 1, gapDegrees: 40 },
+    { rotationSpeed: 1.2, direction: 1, gapDegrees: 40, angle: 60 },
+    { rotationSpeed: 0.8, direction: -1, gapDegrees: 40, angle: 60 },
+    { rotationSpeed: 1.5, direction: 1, gapDegrees: 40, angle: 60, },
   ],
+  mode: '2D',
+};
+
+// Helper function to draw a 3D globe with latitude/longitude lines and holes
+const draw3DSphere = (
+  ctx: CanvasRenderingContext2D,
+  radius: number,
+  _thickness: number,
+  tiltAngle: number,
+  gapAngle: number,
+  rotation: number
+) => {
+  const tiltRad = (tiltAngle * Math.PI) / 180;
+  const gapRad = (gapAngle * Math.PI) / 180 / 2;
+  
+  // Calculate vertical compression for 3D effect
+  const verticalScale = Math.cos(tiltRad);
+  
+  ctx.save();
+  ctx.rotate(rotation);
+  
+  // First, draw a subtle filled sphere for depth
+  ctx.save();
+  ctx.scale(1, verticalScale);
+  const bgGradient = ctx.createRadialGradient(
+    -radius * 0.3, -radius * 0.3, radius * 0.2,
+    0, 0, radius
+  );
+  bgGradient.addColorStop(0, 'rgba(100, 120, 150, 0.12)');
+  bgGradient.addColorStop(0.7, 'rgba(60, 80, 120, 0.08)');
+  bgGradient.addColorStop(1, 'rgba(20, 30, 50, 0.04)');
+  
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+  ctx.fillStyle = bgGradient;
+  ctx.fill();
+  ctx.restore();
+  
+  ctx.scale(1, verticalScale);
+  
+  // Draw longitude lines (meridians) with proper 3D curve
+  const numLongitudes = 20;
+  for (let i = 0; i < numLongitudes; i++) {
+    const lonAngle = (i / numLongitudes) * Math.PI; // 0 to PI only
+    
+    // Check if this longitude is in the gap (hole)
+    const checkAngle = lonAngle > Math.PI / 2 ? lonAngle - Math.PI : lonAngle;
+    const normalizedAngle = ((checkAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    
+    if (Math.abs(normalizedAngle) <= gapRad || Math.abs(normalizedAngle + Math.PI) <= gapRad) {
+      continue; // Skip lines in the hole area
+    }
+    
+    // Calculate visibility - lines on the side are most visible
+    const cosAngle = Math.cos(lonAngle);
+    const sinAngle = Math.sin(lonAngle);
+    
+    // Front hemisphere vs back hemisphere
+    const isFront = sinAngle > 0;
+    const edgeFactor = Math.abs(cosAngle); // Lines at edge (side) are more visible
+    
+    const baseVisibility = isFront ? 0.5 : 0.15;
+    const visibility = baseVisibility * (0.5 + 0.5 * (1 - edgeFactor * edgeFactor));
+    
+    // Draw the meridian as a curved line
+    ctx.beginPath();
+    const steps = 50;
+    for (let j = 0; j <= steps; j++) {
+      const t = j / steps;
+      const lat = (t - 0.5) * Math.PI; // -PI/2 to PI/2
+      
+      const x = radius * Math.cos(lat) * sinAngle;
+      const y = radius * Math.sin(lat);
+      
+      // Apply rotation to show 3D perspective
+      const x2 = x;
+      const y2 = y;
+      
+      if (j === 0) {
+        ctx.moveTo(x2, y2);
+      } else {
+        ctx.lineTo(x2, y2);
+      }
+    }
+    
+    ctx.strokeStyle = `rgba(255, 255, 255, ${visibility})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  
+  // Draw latitude lines (parallels) with proper hole visibility
+  const numLatitudes = 9;
+  for (let i = 0; i < numLatitudes; i++) {
+    const t = i / (numLatitudes - 1);
+    const latAngle = (t - 0.5) * Math.PI * 0.85; // -76° to +76°
+    const latRadius = radius * Math.cos(latAngle);
+    const yOffset = radius * Math.sin(latAngle);
+    
+    if (latRadius < radius * 0.15) continue;
+    
+    // Draw the latitude circle, skipping the hole
+    ctx.beginPath();
+    let inHole = false;
+    const segments = 80;
+    
+    for (let j = 0; j <= segments; j++) {
+      const angle = (j / segments) * 2 * Math.PI;
+      const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
+      const isInHole = Math.abs(normalizedAngle) <= gapRad * 1.2; // Slightly larger hole
+      
+      if (isInHole && !inHole) {
+        // Entering hole - stroke what we have
+        ctx.stroke();
+        ctx.beginPath();
+        inHole = true;
+      } else if (!isInHole && inHole) {
+        // Exiting hole - start new path
+        inHole = false;
+      }
+      
+      if (!isInHole) {
+        const x = latRadius * Math.cos(angle);
+        const z = latRadius * Math.sin(angle);
+        
+        // Apply perspective - lines further back are slightly higher
+        const depthOffset = z * 0.05;
+        
+        if (j === 0 || inHole) {
+          ctx.moveTo(x, yOffset + depthOffset);
+        } else {
+          ctx.lineTo(x, yOffset + depthOffset);
+        }
+      }
+    }
+    
+    // Visibility decreases toward the center (equator area when tilted)
+    const latFactor = Math.abs(latAngle) / (Math.PI / 2);
+    const visibility = 0.25 + 0.3 * latFactor;
+    
+    ctx.strokeStyle = `rgba(255, 255, 255, ${visibility})`;
+    ctx.lineWidth = i === Math.floor(numLatitudes / 2) ? 2.5 : 1.8;
+    ctx.stroke();
+  }
+  
+  // Draw hole edges to make the hole more visible
+  const holeEdgeSteps = 30;
+  for (let side = 0; side < 2; side++) {
+    const edgeAngle = side === 0 ? -gapRad : gapRad;
+    
+    ctx.beginPath();
+    for (let i = 0; i <= holeEdgeSteps; i++) {
+      const t = i / holeEdgeSteps;
+      const lat = (t - 0.5) * Math.PI * 0.9;
+      
+      const r = radius * Math.cos(lat);
+      const x = r * Math.cos(edgeAngle);
+      const y = radius * Math.sin(lat);
+      
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    
+    ctx.strokeStyle = `rgba(255, 200, 150, 0.4)`;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+  
+  // Add highlight to front of sphere for more 3D depth
+  const highlight = ctx.createRadialGradient(
+    -radius * 0.35, -radius * 0.35, 0,
+    -radius * 0.35, -radius * 0.35, radius * 0.5
+  );
+  highlight.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
+  highlight.addColorStop(0.5, 'rgba(255, 255, 255, 0.08)');
+  highlight.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+  ctx.fillStyle = highlight;
+  ctx.fill();
+  
+  ctx.restore();
 };
 
 export default function App() {
@@ -303,13 +489,28 @@ export default function App() {
 
       ctx.save();
       ctx.translate(cx, cy);
-      ctx.rotate(rotRef.current[i]);
-      ctx.beginPath();
-      const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
-      ctx.arc(0, 0, R, circGapRad, 2 * Math.PI - circGapRad);
-      ctx.lineWidth = config.circleThickness;
-      ctx.strokeStyle = "#fff";
-      ctx.stroke();
+      
+      if (config.mode === '2D') {
+        // Original 2D rendering
+        ctx.rotate(rotRef.current[i]);
+        ctx.beginPath();
+        const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
+        ctx.arc(0, 0, R, circGapRad, 2 * Math.PI - circGapRad);
+        ctx.lineWidth = config.circleThickness;
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+      } else {
+        // 3D rendering: draw actual 3D sphere with hole
+        draw3DSphere(
+          ctx,
+          R,
+          config.circleThickness,
+          circ.angle,
+          circ.gapDegrees,
+          rotRef.current[i]
+        );
+      }
+      
       ctx.restore();
     }
 
@@ -377,11 +578,68 @@ export default function App() {
     }
 
     // Draw balls
-    ctx.fillStyle = "#fff";
     for (const b of balls) {
       ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
-      ctx.fill();
+      if (config.mode === '2D') {
+        ctx.fillStyle = "#fff";
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // In 3D mode, draw RED balls with gradient for 3D sphere effect
+        let avgTiltAngle = 0;
+        rings.forEach((_, ringIndex) => {
+          const circ = config.circles[ringIndex] || config.circles[0];
+          avgTiltAngle += circ.angle;
+        });
+        avgTiltAngle /= rings.length;
+
+        const tiltRad = (avgTiltAngle * Math.PI) / 180;
+        const verticalScale = Math.cos(tiltRad);
+        
+        // Draw RED ball with radial gradient for 3D effect
+        const gradient = ctx.createRadialGradient(
+          b.x - b.r * 0.35, 
+          b.y - b.r * 0.35 * verticalScale, 
+          b.r * 0.1,
+          b.x, 
+          b.y, 
+          b.r * 1.2
+        );
+        gradient.addColorStop(0, 'rgba(255, 180, 180, 1)');
+        gradient.addColorStop(0.4, 'rgba(255, 80, 80, 0.95)');
+        gradient.addColorStop(0.7, 'rgba(220, 40, 40, 0.9)');
+        gradient.addColorStop(1, 'rgba(150, 20, 20, 0.85)');
+        
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        ctx.scale(1, verticalScale);
+        ctx.translate(-b.x, -b.y);
+        
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Add specular highlight for more 3D appearance
+        const highlightGradient = ctx.createRadialGradient(
+          b.x - b.r * 0.4, 
+          b.y - b.r * 0.4 * verticalScale,
+          0,
+          b.x - b.r * 0.4,
+          b.y - b.r * 0.4 * verticalScale,
+          b.r * 0.6
+        );
+        highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.7)');
+        highlightGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.2)');
+        highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        
+        ctx.fillStyle = highlightGradient;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.restore();
+      }
     }
 
     animRef.current = requestAnimationFrame(loop);
@@ -416,7 +674,7 @@ export default function App() {
       circleCount: c.circleCount + 1,
       circles: [
         ...c.circles,
-        { rotationSpeed: 1 + Math.random(), direction: Math.random() > 0.5 ? 1 : -1, gapDegrees: c.gapDegrees },
+        { rotationSpeed: 1 + Math.random(), direction: Math.random() > 0.5 ? 1 : -1, angle: 60, gapDegrees: c.gapDegrees },
       ],
     }));
 
@@ -433,6 +691,14 @@ export default function App() {
       <canvas ref={canvasRef} style={{ background: "#0a0f0a", maxWidth: "100%", maxHeight: "calc(100vh - 300px)", height: "auto", width: "auto", display: "block" }} />
 
       <fieldset style={{ display: "flex", flexDirection: "row", gap: 10, flexWrap: "wrap", background: "#111", color: "#ccc", padding: 10, borderRadius: 6, maxWidth: "100%", boxSizing: "border-box" }}>
+        <label>Mode
+          <select
+            value={config.mode}
+            onChange={(e) => setConfig((c) => ({ ...c, mode: e.target.value as '2D' | '3D' }))}>
+            <option value="2D">2D</option>
+            <option value="3D">3D</option>
+          </select>
+        </label>
         <label>Inner circle diameter
           <input type="range" min={200} max={800} step={10}
             value={config.baseDiameter}
@@ -494,40 +760,45 @@ export default function App() {
         {Array.from({ length: config.circleCount }).map((_, i) => {
           const circ = config.circles[i] || config.circles[0];
           return (
-            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8, padding: 8, background: "#222", borderRadius: 4 }}>
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8, padding: 6, background: "#1a1a1a", borderRadius: 4 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 30 }}>#{i + 1}</span>
-                <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 4 }}>
-                  Speed:
-                  <input type="range" min={0} max={3} step={0.1} style={{ flex: 1 }}
-                    value={circ.rotationSpeed}
-                    onChange={(e) => updateCircle(i, "rotationSpeed", parseFloat(e.target.value))} />
-                  <span style={{ width: 30 }}>{circ.rotationSpeed?.toFixed(1) || ''}</span>
-                </label>
+                <span style={{ fontWeight: 600 }}>#{i + 1}</span>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>Speed:</span>
+                <input type="range" min={0} max={3} step={0.1}
+                  value={circ.rotationSpeed}
+                  onChange={(e) => updateCircle(i, "rotationSpeed", parseFloat(e.target.value))} />
                 <select value={circ.direction}
                   onChange={(e) => updateCircle(i, "direction", parseInt(e.target.value))}>
                   <option value={1}>↻</option>
                   <option value={-1}>↺</option>
                 </select>
+                <span>{circ.rotationSpeed?.toFixed(1) || ''}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 30 }}></span>
-                <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 4 }}>
-                  Gap:
-                  <input type="range" min={10} max={120} step={2} style={{ flex: 1 }}
-                    value={circ.gapDegrees}
-                    onChange={(e) => updateCircle(i, "gapDegrees", parseFloat(e.target.value))} />
-                  <span style={{ width: 30 }}>{circ.gapDegrees}°</span>
-                </label>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>Gap:</span>
+                <input type="range" min={10} max={120} step={2} style={{ flex: 1 }}
+                  value={circ.gapDegrees}
+                  onChange={(e) => updateCircle(i, "gapDegrees", parseFloat(e.target.value))} />
+                <span style={{ width: 30 }}>{circ.gapDegrees}°</span>
               </div>
-            </div>
+              {config.mode === '3D' && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>Angle:</span>
+                  <input type="range" min={0} max={90} step={5}
+                    value={circ.angle}
+                    onChange={(e) => updateCircle(i, "angle", parseFloat(e.target.value))}
+                    style={{ flex: 1 }} />
+                  <span>{circ.angle}°</span>
+                </div>
+              )}
+            </div >
           );
         })}
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           <button onClick={addCircle} style={{ flex: 1, background: "#2d2", border: "none", borderRadius: 6, padding: 6 }}>+ Add</button>
           <button onClick={removeCircle} style={{ flex: 1, background: "#c33", border: "none", borderRadius: 6, padding: 6, color: "#fff" }}>− Remove</button>
         </div>
-      </fieldset>
+      </fieldset >
 
 
       <div style={{ display: "flex", gap: 8 }}>
@@ -576,6 +847,6 @@ export default function App() {
 
       <div style={{ fontSize: 14, opacity: 0.8 }}>Canvas: {canvasSize.current}px</div>
       <div style={{ fontSize: 14, opacity: 0.8 }}>Balls: {ballsRef.current.length}</div>
-    </div>
+    </div >
   );
 }
