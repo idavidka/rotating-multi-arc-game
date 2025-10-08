@@ -111,7 +111,9 @@ export default function App() {
 
   const createBallAtCenter = () => {
     const { x: cx, y: cy } = centerRef.current;
-    const isSuper = config.enableSuperBalls && totalBallsCreated.current % 10 === 9;
+    // Only create super ball if enabled, it's the 10th ball, and no other super ball exists
+    const hasSuperBall = ballsRef.current.some(b => b.isSuper && !b.exploding);
+    const isSuper = config.enableSuperBalls && totalBallsCreated.current % 10 === 9 && !hasSuperBall;
     const radius = isSuper ? config.ballRadius * 2 : config.ballRadius;
     const color = isSuper ? "#ff0000" : "#ffffff";
     return { x: cx, y: cy, vx: 0, vy: config.ballSpeed, r: radius, isSuper, color };
@@ -444,7 +446,7 @@ export default function App() {
             x: explosion.x,
             y: explosion.y,
             radius: superBallRadius,
-            maxRadius: superBallRadius * 3, // Triple the size
+            maxRadius: superBallRadius * 10, // 10x the size
             startTime: performance.now()
           });
         }
