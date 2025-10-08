@@ -35,11 +35,11 @@ const defaultConfig: Config = {
   mode: '2D',
 };
 
-// Helper function to draw a 3D sphere with a hole using gradient-based rendering
+// Helper function to draw a 3D globe with latitude/longitude lines and holes
 const draw3DSphere = (
   ctx: CanvasRenderingContext2D,
   radius: number,
-  thickness: number,
+  _thickness: number,
   tiltAngle: number,
   gapAngle: number,
   rotation: number
@@ -47,109 +47,120 @@ const draw3DSphere = (
   const tiltRad = (tiltAngle * Math.PI) / 180;
   const gapRad = (gapAngle * Math.PI) / 180 / 2;
   
-  const innerRadius = radius - thickness / 2;
-  const outerRadius = radius + thickness / 2;
-  
   // Calculate vertical compression for 3D effect
   const verticalScale = Math.cos(tiltRad);
   
   ctx.save();
   ctx.rotate(rotation);
-  
-  // Draw outer sphere with radial gradient for 3D appearance
-  const segments = 64;
-  const angleStep = (2 * Math.PI) / segments;
-  
-  // Create gradient for outer sphere surface
-  const gradient = ctx.createRadialGradient(
-    -outerRadius * 0.3, -outerRadius * 0.3 * verticalScale, outerRadius * 0.1,
-    0, 0, outerRadius * 1.2
-  );
-  gradient.addColorStop(0, 'rgba(255, 255, 255, 0.35)');
-  gradient.addColorStop(0.5, 'rgba(200, 200, 220, 0.25)');
-  gradient.addColorStop(1, 'rgba(100, 100, 120, 0.15)');
-  
-  // Draw outer surface segments
-  for (let i = 0; i < segments; i++) {
-    const angle = i * angleStep;
-    const nextAngle = (i + 1) * angleStep;
-    
-    const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
-    const normalizedNextAngle = ((nextAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
-    
-    if (Math.abs(normalizedAngle) <= gapRad || Math.abs(normalizedNextAngle) <= gapRad) {
-      continue;
-    }
-    
-    // Draw outer ring segment
-    ctx.beginPath();
-    ctx.arc(0, 0, outerRadius, angle, nextAngle);
-    ctx.arc(0, 0, outerRadius - thickness, nextAngle, angle, true);
-    ctx.closePath();
-    
-    // Apply vertical scaling for 3D effect
-    ctx.save();
-    ctx.scale(1, verticalScale);
-    ctx.fillStyle = gradient;
-    ctx.fill();
-    
-    // Add subtle edge highlighting
-    const midAngle = (angle + nextAngle) / 2;
-    const lightFactor = (Math.cos(midAngle) + 1) / 2;
-    ctx.strokeStyle = `rgba(255, 255, 255, ${0.1 * lightFactor})`;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.restore();
-  }
-  
-  // Draw inner sphere surface (darker, more transparent)
-  const innerGradient = ctx.createRadialGradient(
-    outerRadius * 0.2, outerRadius * 0.2 * verticalScale, innerRadius * 0.1,
-    0, 0, innerRadius * 1.1
-  );
-  innerGradient.addColorStop(0, 'rgba(80, 80, 90, 0.15)');
-  innerGradient.addColorStop(0.6, 'rgba(60, 60, 70, 0.12)');
-  innerGradient.addColorStop(1, 'rgba(40, 40, 50, 0.08)');
-  
-  for (let i = 0; i < segments; i++) {
-    const angle = i * angleStep;
-    const nextAngle = (i + 1) * angleStep;
-    
-    const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
-    const normalizedNextAngle = ((nextAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
-    
-    if (Math.abs(normalizedAngle) <= gapRad || Math.abs(normalizedNextAngle) <= gapRad) {
-      continue;
-    }
-    
-    // Draw inner surface
-    ctx.beginPath();
-    ctx.arc(0, 0, innerRadius, angle, nextAngle);
-    ctx.lineWidth = thickness * 0.8;
-    
-    ctx.save();
-    ctx.scale(1, verticalScale);
-    ctx.strokeStyle = innerGradient;
-    ctx.stroke();
-    ctx.restore();
-  }
-  
-  // Add sphere highlights for more 3D appearance
-  const highlightGradient = ctx.createRadialGradient(
-    -radius * 0.4, -radius * 0.4 * verticalScale, 0,
-    -radius * 0.4, -radius * 0.4 * verticalScale, radius * 0.6
-  );
-  highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.25)');
-  highlightGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.08)');
-  highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-  
-  ctx.save();
   ctx.scale(1, verticalScale);
+  
+  // Draw globe wireframe - longitude lines (meridians)
+  const numLongitudes = 16; // Number of longitude lines
+  for (let i = 0; i < numLongitudes; i++) {
+    const angle = (i / numLongitudes) * 2 * Math.PI;
+    
+    // Check if this longitude is in the gap (hole)
+    const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    if (Math.abs(normalizedAngle) <= gapRad) {
+      continue; // Skip lines in the hole area
+    }
+    
+    // Calculate visibility based on position (back lines are dimmer)
+    const cosAngle = Math.cos(angle);
+    const visibility = cosAngle < 0 ? 0.15 : 0.35; // Back vs front
+    
+    ctx.beginPath();
+    ctx.ellipse(0, 0, radius, radius, angle, 0, 2 * Math.PI);
+    ctx.strokeStyle = `rgba(255, 255, 255, ${visibility})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  
+  // Draw globe wireframe - latitude lines (parallels)
+  const numLatitudes = 8; // Number of latitude circles
+  for (let i = 1; i < numLatitudes; i++) {
+    const latAngle = (i / numLatitudes) * Math.PI - Math.PI / 2; // From -90° to +90°
+    const latRadius = radius * Math.cos(latAngle);
+    const yOffset = radius * Math.sin(latAngle);
+    
+    if (latRadius < radius * 0.1) continue; // Skip very small circles near poles
+    
+    // Draw latitude circle with hole
+    const segments = 64;
+    ctx.beginPath();
+    for (let j = 0; j <= segments; j++) {
+      const angle = (j / segments) * 2 * Math.PI;
+      
+      // Check if in gap
+      const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
+      if (Math.abs(normalizedAngle) <= gapRad) {
+        if (j > 0) {
+          ctx.stroke();
+          ctx.beginPath();
+        }
+        continue;
+      }
+      
+      const x = latRadius * Math.cos(angle);
+      
+      if (j === 0 || Math.abs(((angle - (2 * Math.PI) / segments) + Math.PI) % (2 * Math.PI) - Math.PI) <= gapRad) {
+        ctx.moveTo(x, yOffset);
+      } else {
+        ctx.lineTo(x, yOffset);
+      }
+    }
+    
+    // Visibility based on latitude (closer to poles = more visible from top view)
+    const absLat = Math.abs(latAngle);
+    const visibility = 0.15 + 0.25 * (absLat / (Math.PI / 2));
+    
+    ctx.strokeStyle = `rgba(255, 255, 255, ${visibility})`;
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+  
+  // Draw equator more prominently
   ctx.beginPath();
-  ctx.arc(0, 0, outerRadius, 0, 2 * Math.PI);
-  ctx.fillStyle = highlightGradient;
+  const segments = 64;
+  for (let j = 0; j <= segments; j++) {
+    const angle = (j / segments) * 2 * Math.PI;
+    
+    // Check if in gap
+    const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    if (Math.abs(normalizedAngle) <= gapRad) {
+      if (j > 0) {
+        ctx.stroke();
+        ctx.beginPath();
+      }
+      continue;
+    }
+    
+    const x = radius * Math.cos(angle);
+    const y = 0;
+    
+    if (j === 0 || Math.abs(((angle - (2 * Math.PI) / segments) + Math.PI) % (2 * Math.PI) - Math.PI) <= gapRad) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  
+  // Add subtle sphere shading with gradient overlay
+  const gradient = ctx.createRadialGradient(
+    -radius * 0.3, -radius * 0.3, radius * 0.1,
+    0, 0, radius * 1.1
+  );
+  gradient.addColorStop(0, 'rgba(255, 255, 255, 0.15)');
+  gradient.addColorStop(0.6, 'rgba(200, 200, 220, 0.08)');
+  gradient.addColorStop(1, 'rgba(100, 100, 150, 0.03)');
+  
+  ctx.beginPath();
+  ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+  ctx.fillStyle = gradient;
   ctx.fill();
-  ctx.restore();
   
   ctx.restore();
 };
