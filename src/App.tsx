@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from "react";
 
-type CircleConfig = { rotationSpeed: number; direction: 1 | -1 };
+type CircleConfig = { rotationSpeed: number; direction: 1 | -1; gapDegrees: number };
 
 type Config = {
   baseDiameter: number;
@@ -27,9 +27,9 @@ const defaultConfig: Config = {
   circleThickness: 10,
   kickStrength: 0.6,
   circles: [
-    { rotationSpeed: 1.2, direction: 1 },
-    { rotationSpeed: 0.8, direction: -1 },
-    { rotationSpeed: 1.5, direction: 1 },
+    { rotationSpeed: 1.2, direction: 1, gapDegrees: 40 },
+    { rotationSpeed: 0.8, direction: -1, gapDegrees: 40 },
+    { rotationSpeed: 1.5, direction: 1, gapDegrees: 40 },
   ],
 };
 
@@ -156,62 +156,62 @@ export default function App() {
     const dx = b.x - cx;
     const dy = b.y - cy;
     const dist = Math.hypot(dx, dy);
-    
+
     // Check if ball is within the radial range of this ring
     if (dist < ring.inner - b.r || dist > ring.outer + b.r) return false;
 
     const gapHalfAngle = (gapDegrees * Math.PI) / 180 / 2;
-    
+
     // Calculate the two gap edge angles
     const leftEdgeAngle = ring.rot - gapHalfAngle;
     const rightEdgeAngle = ring.rot + gapHalfAngle;
-    
+
     // For each edge, we need to check if the ball is close to the line segment
     // that forms the edge (from inner radius to outer radius at that angle)
-    
+
     const checkEdge = (edgeAngle: number) => {
       // Calculate the edge line endpoints
       const innerX = cx + ring.inner * Math.cos(edgeAngle);
       const innerY = cy + ring.inner * Math.sin(edgeAngle);
       const outerX = cx + ring.outer * Math.cos(edgeAngle);
       const outerY = cy + ring.outer * Math.sin(edgeAngle);
-      
+
       // Vector from inner to outer point
       const edgeVx = outerX - innerX;
       const edgeVy = outerY - innerY;
       const edgeLength = Math.hypot(edgeVx, edgeVy);
-      
+
       // Normalized edge vector
       const edgeDx = edgeVx / edgeLength;
       const edgeDy = edgeVy / edgeLength;
-      
+
       // Vector from inner point to ball
       const toBallX = b.x - innerX;
       const toBallY = b.y - innerY;
-      
+
       // Project ball position onto edge line
       const t = Math.max(0, Math.min(edgeLength, toBallX * edgeDx + toBallY * edgeDy));
-      
+
       // Closest point on edge to ball
       const closestX = innerX + edgeDx * t;
       const closestY = innerY + edgeDy * t;
-      
+
       // Distance from ball to edge
       const distToEdge = Math.hypot(b.x - closestX, b.y - closestY);
-      
+
       // Check if ball is colliding with edge
       if (distToEdge < b.r) {
         // Normal from edge to ball
         const normalX = (b.x - closestX) / distToEdge;
         const normalY = (b.y - closestY) / distToEdge;
-        
+
         // Check if ball is approaching the edge
         const velDotNormal = b.vx * normalX + b.vy * normalY;
         if (velDotNormal < 0) {
           // Reflect velocity
           b.vx -= 2 * velDotNormal * normalX;
           b.vy -= 2 * velDotNormal * normalY;
-          
+
           // Add surface velocity from rotation
           const tangentSpeed = ringAngularSpeed * dist;
           const tx = -normalY;
@@ -219,24 +219,24 @@ export default function App() {
           const kickStrength = 0.3;
           b.vx += tx * tangentSpeed * kickStrength;
           b.vy += ty * tangentSpeed * kickStrength;
-          
+
           normalizeSpeed(b);
-          
+
           // Push ball out of edge
           const overlap = b.r - distToEdge;
           b.x += normalX * overlap;
           b.y += normalY * overlap;
-          
+
           return true;
         }
       }
       return false;
     };
-    
+
     // Check both edges
     if (checkEdge(leftEdgeAngle)) return true;
     if (checkEdge(rightEdgeAngle)) return true;
-    
+
     return false;
   };
 
@@ -288,7 +288,6 @@ export default function App() {
     const size = canvasSize.current;
     const spacing = config.ballRadius * 5 * 2;
     const baseR = config.baseDiameter / 2;
-    const gapRad = (config.gapDegrees * Math.PI) / 180 / 2;
     const halfThickness = config.circleThickness / 2;
 
     ctx.clearRect(0, 0, size, size);
@@ -306,7 +305,8 @@ export default function App() {
       ctx.translate(cx, cy);
       ctx.rotate(rotRef.current[i]);
       ctx.beginPath();
-      ctx.arc(0, 0, R, gapRad, 2 * Math.PI - gapRad);
+      const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
+      ctx.arc(0, 0, R, circGapRad, 2 * Math.PI - circGapRad);
       ctx.lineWidth = config.circleThickness;
       ctx.strokeStyle = "#fff";
       ctx.stroke();
@@ -343,7 +343,7 @@ export default function App() {
       rings.forEach((ring, ringIndex) => {
         const circ = config.circles[ringIndex] || config.circles[0];
         const angularSpeed = rotationEnabled ? circ.rotationSpeed * circ.direction : 0;
-        const inGap = isInGap(b.x, b.y, ring.rot, config.gapDegrees);
+        const inGap = isInGap(b.x, b.y, ring.rot, circ.gapDegrees);
         if (!inGap) {
           const innerEdge = ring.inner - b.r;
           const outerEdge = ring.outer + b.r;
@@ -358,7 +358,7 @@ export default function App() {
           }
         } else {
           // Check for collision with gap edges
-          checkGapEdgeCollision(b, ring, config.gapDegrees, angularSpeed);
+          checkGapEdgeCollision(b, ring, circ.gapDegrees, angularSpeed);
         }
       });
     }
@@ -416,7 +416,7 @@ export default function App() {
       circleCount: c.circleCount + 1,
       circles: [
         ...c.circles,
-        { rotationSpeed: 1 + Math.random(), direction: Math.random() > 0.5 ? 1 : -1 },
+        { rotationSpeed: 1 + Math.random(), direction: Math.random() > 0.5 ? 1 : -1, gapDegrees: c.gapDegrees },
       ],
     }));
 
@@ -451,12 +451,12 @@ export default function App() {
             onChange={(e) => updateConfig("circleCount", parseInt(e.target.value))} />
           <span>{config.circleCount}</span>
         </label>
-        <label>Gap (°)
+        {/* <label>Gap (°)
           <input type="range" min={10} max={120} step={2}
             value={config.gapDegrees}
             onChange={(e) => updateConfig("gapDegrees", parseFloat(e.target.value))} />
           <span>{config.gapDegrees}</span>
-        </label>
+        </label> */}
         <label>Balls on escape
           <input type="range" min={0} max={5} step={1}
             value={config.ballsOnEscape}
@@ -494,17 +494,32 @@ export default function App() {
         {Array.from({ length: config.circleCount }).map((_, i) => {
           const circ = config.circles[i] || config.circles[0];
           return (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-              <span>#{i + 1}</span>
-              <input type="range" min={0} max={3} step={0.1}
-                value={circ.rotationSpeed}
-                onChange={(e) => updateCircle(i, "rotationSpeed", parseFloat(e.target.value))} />
-              <select value={circ.direction}
-                onChange={(e) => updateCircle(i, "direction", parseInt(e.target.value))}>
-                <option value={1}>↻</option>
-                <option value={-1}>↺</option>
-              </select>
-              <span>{circ.rotationSpeed?.toFixed(1) || ''}</span>
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8, padding: 8, background: "#222", borderRadius: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 30 }}>#{i + 1}</span>
+                <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 4 }}>
+                  Speed:
+                  <input type="range" min={0} max={3} step={0.1} style={{ flex: 1 }}
+                    value={circ.rotationSpeed}
+                    onChange={(e) => updateCircle(i, "rotationSpeed", parseFloat(e.target.value))} />
+                  <span style={{ width: 30 }}>{circ.rotationSpeed?.toFixed(1) || ''}</span>
+                </label>
+                <select value={circ.direction}
+                  onChange={(e) => updateCircle(i, "direction", parseInt(e.target.value))}>
+                  <option value={1}>↻</option>
+                  <option value={-1}>↺</option>
+                </select>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 30 }}></span>
+                <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 4 }}>
+                  Gap:
+                  <input type="range" min={10} max={120} step={2} style={{ flex: 1 }}
+                    value={circ.gapDegrees}
+                    onChange={(e) => updateCircle(i, "gapDegrees", parseFloat(e.target.value))} />
+                  <span style={{ width: 30 }}>{circ.gapDegrees}°</span>
+                </label>
+              </div>
             </div>
           );
         })}
