@@ -146,6 +146,100 @@ export default function App() {
     normalizeSpeed(b);
   };
 
+  const checkGapEdgeCollision = (
+    b: any,
+    ring: { inner: number; outer: number; rot: number },
+    gapDegrees: number,
+    ringAngularSpeed: number
+  ) => {
+    const { x: cx, y: cy } = centerRef.current;
+    const dx = b.x - cx;
+    const dy = b.y - cy;
+    const dist = Math.hypot(dx, dy);
+    
+    // Check if ball is within the radial range of this ring
+    if (dist < ring.inner - b.r || dist > ring.outer + b.r) return false;
+
+    const gapHalfAngle = (gapDegrees * Math.PI) / 180 / 2;
+    
+    // Calculate the two gap edge angles
+    const leftEdgeAngle = ring.rot - gapHalfAngle;
+    const rightEdgeAngle = ring.rot + gapHalfAngle;
+    
+    // For each edge, we need to check if the ball is close to the line segment
+    // that forms the edge (from inner radius to outer radius at that angle)
+    
+    const checkEdge = (edgeAngle: number) => {
+      // Calculate the edge line endpoints
+      const innerX = cx + ring.inner * Math.cos(edgeAngle);
+      const innerY = cy + ring.inner * Math.sin(edgeAngle);
+      const outerX = cx + ring.outer * Math.cos(edgeAngle);
+      const outerY = cy + ring.outer * Math.sin(edgeAngle);
+      
+      // Vector from inner to outer point
+      const edgeVx = outerX - innerX;
+      const edgeVy = outerY - innerY;
+      const edgeLength = Math.hypot(edgeVx, edgeVy);
+      
+      // Normalized edge vector
+      const edgeDx = edgeVx / edgeLength;
+      const edgeDy = edgeVy / edgeLength;
+      
+      // Vector from inner point to ball
+      const toBallX = b.x - innerX;
+      const toBallY = b.y - innerY;
+      
+      // Project ball position onto edge line
+      const t = Math.max(0, Math.min(edgeLength, toBallX * edgeDx + toBallY * edgeDy));
+      
+      // Closest point on edge to ball
+      const closestX = innerX + edgeDx * t;
+      const closestY = innerY + edgeDy * t;
+      
+      // Distance from ball to edge
+      const distToEdge = Math.hypot(b.x - closestX, b.y - closestY);
+      
+      // Check if ball is colliding with edge
+      if (distToEdge < b.r) {
+        // Normal from edge to ball
+        const normalX = (b.x - closestX) / distToEdge;
+        const normalY = (b.y - closestY) / distToEdge;
+        
+        // Check if ball is approaching the edge
+        const velDotNormal = b.vx * normalX + b.vy * normalY;
+        if (velDotNormal < 0) {
+          // Reflect velocity
+          b.vx -= 2 * velDotNormal * normalX;
+          b.vy -= 2 * velDotNormal * normalY;
+          
+          // Add surface velocity from rotation
+          const tangentSpeed = ringAngularSpeed * dist;
+          const tx = -normalY;
+          const ty = normalX;
+          const kickStrength = 0.3;
+          b.vx += tx * tangentSpeed * kickStrength;
+          b.vy += ty * tangentSpeed * kickStrength;
+          
+          normalizeSpeed(b);
+          
+          // Push ball out of edge
+          const overlap = b.r - distToEdge;
+          b.x += normalX * overlap;
+          b.y += normalY * overlap;
+          
+          return true;
+        }
+      }
+      return false;
+    };
+    
+    // Check both edges
+    if (checkEdge(leftEdgeAngle)) return true;
+    if (checkEdge(rightEdgeAngle)) return true;
+    
+    return false;
+  };
+
   const collideBalls = (a: any, b: any) => {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
@@ -262,6 +356,9 @@ export default function App() {
             b.x = cx + nx * target;
             b.y = cy + ny * target;
           }
+        } else {
+          // Check for collision with gap edges
+          checkGapEdgeCollision(b, ring, config.gapDegrees, angularSpeed);
         }
       });
     }
