@@ -35,7 +35,7 @@ const defaultConfig: Config = {
   mode: '2D',
 };
 
-// Helper function to draw a 3D sphere with a hole
+// Helper function to draw a 3D sphere with a hole using gradient-based rendering
 const draw3DSphere = (
   ctx: CanvasRenderingContext2D,
   radius: number,
@@ -48,6 +48,7 @@ const draw3DSphere = (
   const gapRad = (gapAngle * Math.PI) / 180 / 2;
   
   const innerRadius = radius - thickness / 2;
+  const outerRadius = radius + thickness / 2;
   
   // Calculate vertical compression for 3D effect
   const verticalScale = Math.cos(tiltRad);
@@ -55,147 +56,100 @@ const draw3DSphere = (
   ctx.save();
   ctx.rotate(rotation);
   
-  // Draw the sphere surface with filled segments for solid appearance
-  const latSegments = 20; // vertical segments
-  const lonSegments = 64; // horizontal segments
+  // Draw outer sphere with radial gradient for 3D appearance
+  const segments = 64;
+  const angleStep = (2 * Math.PI) / segments;
   
-  // Draw from back to front for proper layering
-  for (let lat = 0; lat < latSegments; lat++) {
-    const latAngle = (lat / latSegments) * Math.PI;
-    const nextLatAngle = ((lat + 1) / latSegments) * Math.PI;
+  // Create gradient for outer sphere surface
+  const gradient = ctx.createRadialGradient(
+    -outerRadius * 0.3, -outerRadius * 0.3 * verticalScale, outerRadius * 0.1,
+    0, 0, outerRadius * 1.2
+  );
+  gradient.addColorStop(0, 'rgba(255, 255, 255, 0.35)');
+  gradient.addColorStop(0.5, 'rgba(200, 200, 220, 0.25)');
+  gradient.addColorStop(1, 'rgba(100, 100, 120, 0.15)');
+  
+  // Draw outer surface segments
+  for (let i = 0; i < segments; i++) {
+    const angle = i * angleStep;
+    const nextAngle = (i + 1) * angleStep;
     
-    for (let lon = 0; lon < lonSegments; lon++) {
-      const lonAngle = (lon / lonSegments) * 2 * Math.PI;
-      const nextLonAngle = ((lon + 1) / lonSegments) * 2 * Math.PI;
-      
-      // Check if this segment is in the gap (hole)
-      const normalizedLon = ((lonAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
-      const normalizedNextLon = ((nextLonAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
-      
-      if (Math.abs(normalizedLon) <= gapRad || Math.abs(normalizedNextLon) <= gapRad) {
-        continue;
-      }
-      
-      // Calculate sphere surface points (using spherical coordinates)
-      const r = radius;
-      
-      // For outer surface
-      const x1 = r * Math.sin(latAngle) * Math.cos(lonAngle);
-      const y1 = r * Math.sin(latAngle) * Math.sin(lonAngle) * verticalScale;
-      const z1 = r * Math.cos(latAngle);
-      
-      const x2 = r * Math.sin(latAngle) * Math.cos(nextLonAngle);
-      const y2 = r * Math.sin(latAngle) * Math.sin(nextLonAngle) * verticalScale;
-      
-      const x3 = r * Math.sin(nextLatAngle) * Math.cos(nextLonAngle);
-      const y3 = r * Math.sin(nextLatAngle) * Math.sin(nextLonAngle) * verticalScale;
-      const z3 = r * Math.cos(nextLatAngle);
-      
-      const x4 = r * Math.sin(nextLatAngle) * Math.cos(lonAngle);
-      const y4 = r * Math.sin(nextLatAngle) * Math.sin(lonAngle) * verticalScale;
-      
-      // Calculate lighting based on normal vector (pointing outward)
-      const normalLon = (lonAngle + nextLonAngle) / 2;
-      const normalLat = (latAngle + nextLatAngle) / 2;
-      
-      // Light source from top-front
-      const lightDirX = 0.3;
-      const lightDirY = -0.5;
-      const lightDirZ = -0.8;
-      
-      const normalX = Math.sin(normalLat) * Math.cos(normalLon);
-      const normalY = Math.sin(normalLat) * Math.sin(normalLon);
-      const normalZ = Math.cos(normalLat);
-      
-      const dotProduct = normalX * lightDirX + normalY * lightDirY + normalZ * lightDirZ;
-      const lightIntensity = Math.max(0.2, Math.min(1, (dotProduct + 1) / 2));
-      
-      // Determine if this segment is visible (front-facing)
-      const avgZ = (z1 + z3) / 2;
-      const visibility = avgZ < 0 ? 0.85 : 0.4; // Back vs front
-      
-      // Draw the quad as two triangles
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.lineTo(x3, y3);
-      ctx.lineTo(x4, y4);
-      ctx.closePath();
-      
-      const alpha = visibility * 0.7;
-      const brightness = Math.floor(200 + 55 * lightIntensity);
-      ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${alpha})`;
-      ctx.fill();
-      
-      // Add edge for definition
-      ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.3})`;
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
+    const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    const normalizedNextAngle = ((nextAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    
+    if (Math.abs(normalizedAngle) <= gapRad || Math.abs(normalizedNextAngle) <= gapRad) {
+      continue;
     }
+    
+    // Draw outer ring segment
+    ctx.beginPath();
+    ctx.arc(0, 0, outerRadius, angle, nextAngle);
+    ctx.arc(0, 0, outerRadius - thickness, nextAngle, angle, true);
+    ctx.closePath();
+    
+    // Apply vertical scaling for 3D effect
+    ctx.save();
+    ctx.scale(1, verticalScale);
+    ctx.fillStyle = gradient;
+    ctx.fill();
+    
+    // Add subtle edge highlighting
+    const midAngle = (angle + nextAngle) / 2;
+    const lightFactor = (Math.cos(midAngle) + 1) / 2;
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.1 * lightFactor})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
   }
   
-  // Draw inner surface (darker and less visible)
-  for (let lat = 0; lat < latSegments; lat++) {
-    const latAngle = (lat / latSegments) * Math.PI;
-    const nextLatAngle = ((lat + 1) / latSegments) * Math.PI;
+  // Draw inner sphere surface (darker, more transparent)
+  const innerGradient = ctx.createRadialGradient(
+    outerRadius * 0.2, outerRadius * 0.2 * verticalScale, innerRadius * 0.1,
+    0, 0, innerRadius * 1.1
+  );
+  innerGradient.addColorStop(0, 'rgba(80, 80, 90, 0.15)');
+  innerGradient.addColorStop(0.6, 'rgba(60, 60, 70, 0.12)');
+  innerGradient.addColorStop(1, 'rgba(40, 40, 50, 0.08)');
+  
+  for (let i = 0; i < segments; i++) {
+    const angle = i * angleStep;
+    const nextAngle = (i + 1) * angleStep;
     
-    for (let lon = 0; lon < lonSegments; lon++) {
-      const lonAngle = (lon / lonSegments) * 2 * Math.PI;
-      const nextLonAngle = ((lon + 1) / lonSegments) * 2 * Math.PI;
-      
-      const normalizedLon = ((lonAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
-      const normalizedNextLon = ((nextLonAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
-      
-      if (Math.abs(normalizedLon) <= gapRad || Math.abs(normalizedNextLon) <= gapRad) {
-        continue;
-      }
-      
-      const r = innerRadius;
-      
-      const x1 = r * Math.sin(latAngle) * Math.cos(lonAngle);
-      const y1 = r * Math.sin(latAngle) * Math.sin(lonAngle) * verticalScale;
-      const z1 = r * Math.cos(latAngle);
-      
-      const x2 = r * Math.sin(latAngle) * Math.cos(nextLonAngle);
-      const y2 = r * Math.sin(latAngle) * Math.sin(nextLonAngle) * verticalScale;
-      
-      const x3 = r * Math.sin(nextLatAngle) * Math.cos(nextLonAngle);
-      const y3 = r * Math.sin(nextLatAngle) * Math.sin(nextLonAngle) * verticalScale;
-      
-      const x4 = r * Math.sin(nextLatAngle) * Math.cos(lonAngle);
-      const y4 = r * Math.sin(nextLatAngle) * Math.sin(lonAngle) * verticalScale;
-      
-      // Inner surface lighting (inverted normals)
-      const normalLon = (lonAngle + nextLonAngle) / 2;
-      const normalLat = (latAngle + nextLatAngle) / 2;
-      
-      const normalX = -Math.sin(normalLat) * Math.cos(normalLon);
-      const normalY = -Math.sin(normalLat) * Math.sin(normalLon);
-      const normalZ = -Math.cos(normalLat);
-      
-      const lightDirX = 0.3;
-      const lightDirY = -0.5;
-      const lightDirZ = -0.8;
-      
-      const dotProduct = normalX * lightDirX + normalY * lightDirY + normalZ * lightDirZ;
-      const lightIntensity = Math.max(0.1, Math.min(0.6, (dotProduct + 1) / 2));
-      
-      const avgZ = (z1) / 1;
-      const visibility = avgZ > 0 ? 0.5 : 0.15; // Show inner surface when visible
-      
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.lineTo(x3, y3);
-      ctx.lineTo(x4, y4);
-      ctx.closePath();
-      
-      const alpha = visibility * 0.6;
-      const brightness = Math.floor(120 + 80 * lightIntensity);
-      ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${alpha})`;
-      ctx.fill();
+    const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    const normalizedNextAngle = ((nextAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    
+    if (Math.abs(normalizedAngle) <= gapRad || Math.abs(normalizedNextAngle) <= gapRad) {
+      continue;
     }
+    
+    // Draw inner surface
+    ctx.beginPath();
+    ctx.arc(0, 0, innerRadius, angle, nextAngle);
+    ctx.lineWidth = thickness * 0.8;
+    
+    ctx.save();
+    ctx.scale(1, verticalScale);
+    ctx.strokeStyle = innerGradient;
+    ctx.stroke();
+    ctx.restore();
   }
+  
+  // Add sphere highlights for more 3D appearance
+  const highlightGradient = ctx.createRadialGradient(
+    -radius * 0.4, -radius * 0.4 * verticalScale, 0,
+    -radius * 0.4, -radius * 0.4 * verticalScale, radius * 0.6
+  );
+  highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.25)');
+  highlightGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.08)');
+  highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  
+  ctx.save();
+  ctx.scale(1, verticalScale);
+  ctx.beginPath();
+  ctx.arc(0, 0, outerRadius, 0, 2 * Math.PI);
+  ctx.fillStyle = highlightGradient;
+  ctx.fill();
+  ctx.restore();
   
   ctx.restore();
 };
@@ -566,7 +520,7 @@ export default function App() {
         ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
         ctx.fill();
       } else {
-        // In 3D mode, draw balls with gradient for 3D sphere effect
+        // In 3D mode, draw RED balls with gradient for 3D sphere effect
         let avgTiltAngle = 0;
         rings.forEach((_, ringIndex) => {
           const circ = config.circles[ringIndex] || config.circles[0];
@@ -577,18 +531,19 @@ export default function App() {
         const tiltRad = (avgTiltAngle * Math.PI) / 180;
         const verticalScale = Math.cos(tiltRad);
         
-        // Draw ball with radial gradient for 3D effect
+        // Draw RED ball with radial gradient for 3D effect
         const gradient = ctx.createRadialGradient(
-          b.x - b.r * 0.3, 
-          b.y - b.r * 0.3 * verticalScale, 
+          b.x - b.r * 0.35, 
+          b.y - b.r * 0.35 * verticalScale, 
           b.r * 0.1,
           b.x, 
           b.y, 
-          b.r
+          b.r * 1.2
         );
-        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-        gradient.addColorStop(0.7, 'rgba(220, 220, 220, 0.9)');
-        gradient.addColorStop(1, 'rgba(180, 180, 180, 0.8)');
+        gradient.addColorStop(0, 'rgba(255, 180, 180, 1)');
+        gradient.addColorStop(0.4, 'rgba(255, 80, 80, 0.95)');
+        gradient.addColorStop(0.7, 'rgba(220, 40, 40, 0.9)');
+        gradient.addColorStop(1, 'rgba(150, 20, 20, 0.85)');
         
         ctx.save();
         ctx.translate(b.x, b.y);
@@ -596,6 +551,24 @@ export default function App() {
         ctx.translate(-b.x, -b.y);
         
         ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Add specular highlight for more 3D appearance
+        const highlightGradient = ctx.createRadialGradient(
+          b.x - b.r * 0.4, 
+          b.y - b.r * 0.4 * verticalScale,
+          0,
+          b.x - b.r * 0.4,
+          b.y - b.r * 0.4 * verticalScale,
+          b.r * 0.6
+        );
+        highlightGradient.addColorStop(0, 'rgba(255, 255, 255, 0.7)');
+        highlightGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.2)');
+        highlightGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        
+        ctx.fillStyle = highlightGradient;
         ctx.beginPath();
         ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
         ctx.fill();
