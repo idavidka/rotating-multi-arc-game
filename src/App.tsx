@@ -46,6 +46,7 @@ export default function App() {
   const spawnQueue = useRef(0);
   const spawnCooldown = useRef(0);
   const canvasSize = useRef(0);
+  const totalBallsCreated = useRef(0);
 
   // --- Compute required canvas size based on largest circle ---
   const computeCanvasSize = () => {
@@ -105,6 +106,7 @@ export default function App() {
     ballsRef.current = [];
     spawnQueue.current = 0;
     spawnCooldown.current = 0;
+    totalBallsCreated.current = 0;
   };
 
   const reflectFromCircle = (
@@ -321,6 +323,7 @@ export default function App() {
       const lastDist = last ? Math.abs(last.y - cy) : Infinity;
       if (!last || lastDist > config.ballRadius * 2) {
         balls.push(createBallAtCenter());
+        totalBallsCreated.current++;
         spawnQueue.current--;
         spawnCooldown.current = 0.05;
       }
@@ -383,6 +386,20 @@ export default function App() {
       ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
       ctx.fill();
     }
+
+    // Draw ball count text on canvas
+    ctx.font = "16px system-ui, sans-serif";
+    ctx.fillStyle = "#fff";
+    
+    // Top-left: existing ball count
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(`Balls: ${balls.length}`, 10, 10);
+    
+    // Top-right: all ball count (total balls created since restart)
+    ctx.textAlign = "right";
+    ctx.textBaseline = "top";
+    ctx.fillText(`All: ${totalBallsCreated.current}`, size - 10, 10);
 
     animRef.current = requestAnimationFrame(loop);
   };
