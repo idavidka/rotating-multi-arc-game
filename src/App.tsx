@@ -49,7 +49,8 @@ export default function App() {
   const [running, setRunning] = useState(true);
   const [rotationEnabled, setRotationEnabled] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const ballsRef = useRef<{ x: number; y: number; vx: number; vy: number; r: number; isSuper?: boolean; color?: string }[]>([]);
+  const ballsRef = useRef<{ x: number; y: number; vx: number; vy: number; r: number; isSuper?: boolean; color?: string; exploding?: boolean }[]>([]);
+  const explosionsRef = useRef<{ x: number; y: number; radius: number; maxRadius: number; startTime: number }[]>([]);
   const rotRef = useRef<number[]>([]);
   const lastRef = useRef(performance.now());
   const centerRef = useRef({ x: 0, y: 0 });
@@ -118,30 +119,31 @@ export default function App() {
 
   const resetBalls = () => {
     ballsRef.current = [];
+    explosionsRef.current = [];
     spawnQueue.current = 0;
     spawnCooldown.current = 0;
     totalBallsCreated.current = 0;
   };
 
-  const applyShockWave = (epicenterX: number, epicenterY: number) => {
+  const applyShockWaveFromRing = (epicenterX: number, epicenterY: number, ringRadius: number, ringThickness: number) => {
     const balls = ballsRef.current;
     for (const b of balls) {
-      if (b.isSuper) continue; // Don't affect super balls (which will be removed anyway)
+      if (b.isSuper || b.exploding) continue; // Don't affect super balls or exploding balls
       
       const dx = b.x - epicenterX;
       const dy = b.y - epicenterY;
       const dist = Math.hypot(dx, dy);
       
-      // Apply force inversely proportional to distance
-      // Stronger force closer to epicenter
-      if (dist > 0 && dist < 300) { // Max shock wave radius
-        const force = config.shockWaveStrength / (dist + 1); // +1 to avoid division by zero
+      // Only push balls that are near the expanding ring edge
+      const distanceFromRing = Math.abs(dist - ringRadius);
+      if (distanceFromRing < ringThickness && dist > 0) {
+        const force = config.shockWaveStrength / (distanceFromRing + 1);
         const nx = dx / dist;
         const ny = dy / dist;
         
-        // Apply force towards epicenter (pulling effect)
-        b.vx -= nx * force;
-        b.vy -= ny * force;
+        // Apply force away from epicenter (pushing effect)
+        b.vx += nx * force;
+        b.vy += ny * force;
         
         // Normalize speed to maintain constant speed
         normalizeSpeed(b);
@@ -425,17 +427,65 @@ export default function App() {
 
     // Handle super ball explosions
     if (ballsToExplode.length > 0) {
-      // Apply shock waves
+      // Create explosion animations and mark balls as exploding
       for (const explosion of ballsToExplode) {
-        applyShockWave(explosion.x, explosion.y);
+        // Find the super ball that's exploding to get its radius
+        const explodingBall = balls.find(b => 
+          b.isSuper && Math.hypot(b.x - explosion.x, b.y - explosion.y) < 1
+        );
+        
+        if (explodingBall) {
+          const superBallRadius = explodingBall.r;
+          // Mark ball as exploding so it won't be drawn
+          explodingBall.exploding = true;
+          
+          // Create explosion ring animation
+          explosionsRef.current.push({
+            x: explosion.x,
+            y: explosion.y,
+            radius: superBallRadius,
+            maxRadius: superBallRadius * 3, // Triple the size
+            startTime: performance.now()
+          });
+        }
       }
+    }
+
+    // Update and render explosions
+    const explosions = explosionsRef.current;
+    const explosionDuration = 500; // milliseconds
+    const currentTime = performance.now();
+    
+    for (let i = explosions.length - 1; i >= 0; i--) {
+      const explosion = explosions[i];
+      const elapsed = currentTime - explosion.startTime;
+      const progress = Math.min(elapsed / explosionDuration, 1);
       
-      // Remove exploded super balls
-      for (let i = balls.length - 1; i >= 0; i--) {
-        if (balls[i].isSuper && ballsToExplode.some(e => 
-          Math.hypot(balls[i].x - e.x, balls[i].y - e.y) < 1
-        )) {
-          balls.splice(i, 1);
+      // Calculate current ring radius
+      const currentRadius = explosion.radius + (explosion.maxRadius - explosion.radius) * progress;
+      
+      // Apply shock wave as ring expands
+      const ringThickness = explosion.maxRadius * 0.3; // Thick ring for better effect
+      applyShockWaveFromRing(explosion.x, explosion.y, currentRadius, ringThickness);
+      
+      // Draw the expanding ring
+      ctx.strokeStyle = `rgba(255, 0, 0, ${1 - progress})`; // Fade out as it grows
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(explosion.x, explosion.y, currentRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Remove explosion when complete
+      if (progress >= 1) {
+        explosions.splice(i, 1);
+        
+        // Remove the exploded super ball
+        for (let j = balls.length - 1; j >= 0; j--) {
+          if (balls[j].exploding && 
+              Math.hypot(balls[j].x - explosion.x, balls[j].y - explosion.y) < 1) {
+            balls.splice(j, 1);
+            break;
+          }
         }
       }
     }
@@ -451,6 +501,9 @@ export default function App() {
 
     // Draw balls
     for (const b of balls) {
+      // Skip exploding balls (they're hidden during explosion animation)
+      if (b.exploding) continue;
+      
       ctx.fillStyle = b.color || "#fff";
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
