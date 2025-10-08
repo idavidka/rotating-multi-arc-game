@@ -12,6 +12,8 @@ type Config = {
   ballSpeed: number;
   circleThickness: number;
   kickStrength: number;
+  enableSuperBalls: boolean;
+  shockWaveStrength: number;
   circles: CircleConfig[];
 };
 
@@ -24,6 +26,8 @@ const defaultConfig: Config = {
   ballSpeed: 250,
   circleThickness: 10,
   kickStrength: 0.6,
+  enableSuperBalls: true,
+  shockWaveStrength: 300,
   circles: [
     {
       rotationSpeed: 1.2, direction: 1, gapDegrees: 40,
@@ -45,7 +49,8 @@ export default function App() {
   const [running, setRunning] = useState(true);
   const [rotationEnabled, setRotationEnabled] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const ballsRef = useRef<{ x: number; y: number; vx: number; vy: number; r: number }[]>([]);
+  const ballsRef = useRef<{ x: number; y: number; vx: number; vy: number; r: number; isSuper?: boolean; color?: string; exploding?: boolean }[]>([]);
+  const explosionsRef = useRef<{ x: number; y: number; radius: number; maxRadius: number; startTime: number }[]>([]);
   const rotRef = useRef<number[]>([]);
   const lastRef = useRef(performance.now());
   const centerRef = useRef({ x: 0, y: 0 });
@@ -106,14 +111,46 @@ export default function App() {
 
   const createBallAtCenter = () => {
     const { x: cx, y: cy } = centerRef.current;
-    return { x: cx, y: cy, vx: 0, vy: config.ballSpeed, r: config.ballRadius };
+    // Only create super ball if enabled, it's the 10th ball, and no other super ball exists
+    const hasSuperBall = ballsRef.current.some(b => b.isSuper && !b.exploding);
+    const isSuper = config.enableSuperBalls && totalBallsCreated.current % 10 === 9 && !hasSuperBall;
+    const radius = isSuper ? config.ballRadius * 2 : config.ballRadius;
+    const color = isSuper ? "#ff0000" : "#ffffff";
+    return { x: cx, y: cy, vx: 0, vy: config.ballSpeed, r: radius, isSuper, color };
   };
 
   const resetBalls = () => {
     ballsRef.current = [];
+    explosionsRef.current = [];
     spawnQueue.current = 0;
     spawnCooldown.current = 0;
     totalBallsCreated.current = 0;
+  };
+
+  const applyShockWaveFromRing = (epicenterX: number, epicenterY: number, ringRadius: number, ringThickness: number) => {
+    const balls = ballsRef.current;
+    for (const b of balls) {
+      if (b.isSuper || b.exploding) continue; // Don't affect super balls or exploding balls
+      
+      const dx = b.x - epicenterX;
+      const dy = b.y - epicenterY;
+      const dist = Math.hypot(dx, dy);
+      
+      // Only push balls that are near the expanding ring edge
+      const distanceFromRing = Math.abs(dist - ringRadius);
+      if (distanceFromRing < ringThickness && dist > 0) {
+        const force = config.shockWaveStrength / (distanceFromRing + 1);
+        const nx = dx / dist;
+        const ny = dy / dist;
+        
+        // Apply force away from epicenter (pushing effect)
+        b.vx += nx * force;
+        b.vy += ny * force;
+        
+        // Normalize speed to maintain constant speed
+        normalizeSpeed(b);
+      }
+    }
   };
 
   const reflectFromCircle = (
@@ -124,7 +161,7 @@ export default function App() {
     ring: { inner: number; outer: number; rot: number },
     ringAngularSpeed: number,
     kickStrength: number
-  ) => {
+  ): boolean => {
     const innerDiff = Math.abs(dist - ring.inner);
     const outerDiff = Math.abs(dist - ring.outer);
     const isInner = innerDiff < outerDiff;
@@ -140,7 +177,7 @@ export default function App() {
     let rvx = b.vx - surfaceVx;
     let rvy = b.vy - surfaceVy;
     const dot = rvx * normalX + rvy * normalY;
-    if (dot > 0) return;
+    if (dot > 0) return false;
 
     rvx -= 2 * dot * normalX;
     rvy -= 2 * dot * normalY;
@@ -153,6 +190,7 @@ export default function App() {
     b.vy += ty * tangentSpeed * kickStrength * 0.5;
 
     normalizeSpeed(b);
+    return true;
   };
 
   const checkGapEdgeCollision = (
@@ -342,6 +380,8 @@ export default function App() {
       spawnQueue.current = config.initialBalls - balls.length;
 
     // Movement + collisions
+    const ballsToExplode: { x: number; y: number }[] = [];
+    
     for (const b of balls) {
       b.x += b.vx * dt;
       b.y += b.vy * dt;
@@ -360,7 +400,11 @@ export default function App() {
           const innerEdge = ring.inner - b.r;
           const outerEdge = ring.outer + b.r;
           if (dist > innerEdge && dist < outerEdge) {
-            reflectFromCircle(b, nx, ny, dist, ring, angularSpeed, config.kickStrength);
+            const collided = reflectFromCircle(b, nx, ny, dist, ring, angularSpeed, config.kickStrength);
+            if (collided && b.isSuper) {
+              // Super ball explodes on collision with circle
+              ballsToExplode.push({ x: b.x, y: b.y });
+            }
             const target =
               Math.abs(dist - innerEdge) < Math.abs(dist - outerEdge)
                 ? innerEdge - 0.5
@@ -370,7 +414,11 @@ export default function App() {
           }
         } else {
           // Check for collision with gap edges
-          checkGapEdgeCollision(b, ring, circ.gapDegrees, angularSpeed);
+          const edgeCollided = checkGapEdgeCollision(b, ring, circ.gapDegrees, angularSpeed);
+          if (edgeCollided && b.isSuper) {
+            // Super ball explodes on collision with gap edge
+            ballsToExplode.push({ x: b.x, y: b.y });
+          }
         }
       });
     }
@@ -378,6 +426,71 @@ export default function App() {
     // Ball collisions
     for (let i = 0; i < balls.length; i++)
       for (let j = i + 1; j < balls.length; j++) collideBalls(balls[i], balls[j]);
+
+    // Handle super ball explosions
+    if (ballsToExplode.length > 0) {
+      // Create explosion animations and mark balls as exploding
+      for (const explosion of ballsToExplode) {
+        // Find the super ball that's exploding to get its radius
+        const explodingBall = balls.find(b => 
+          b.isSuper && Math.hypot(b.x - explosion.x, b.y - explosion.y) < 1
+        );
+        
+        if (explodingBall) {
+          const superBallRadius = explodingBall.r;
+          // Mark ball as exploding so it won't be drawn
+          explodingBall.exploding = true;
+          
+          // Create explosion ring animation
+          explosionsRef.current.push({
+            x: explosion.x,
+            y: explosion.y,
+            radius: superBallRadius,
+            maxRadius: superBallRadius * 10, // 10x the size
+            startTime: performance.now()
+          });
+        }
+      }
+    }
+
+    // Update and render explosions
+    const explosions = explosionsRef.current;
+    const explosionDuration = 500; // milliseconds
+    const currentTime = performance.now();
+    
+    for (let i = explosions.length - 1; i >= 0; i--) {
+      const explosion = explosions[i];
+      const elapsed = currentTime - explosion.startTime;
+      const progress = Math.min(elapsed / explosionDuration, 1);
+      
+      // Calculate current ring radius
+      const currentRadius = explosion.radius + (explosion.maxRadius - explosion.radius) * progress;
+      
+      // Apply shock wave as ring expands
+      const ringThickness = explosion.maxRadius * 0.3; // Thick ring for better effect
+      applyShockWaveFromRing(explosion.x, explosion.y, currentRadius, ringThickness);
+      
+      // Draw the expanding ring
+      ctx.strokeStyle = `rgba(255, 0, 0, ${1 - progress})`; // Fade out as it grows
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(explosion.x, explosion.y, currentRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      // Remove explosion when complete
+      if (progress >= 1) {
+        explosions.splice(i, 1);
+        
+        // Remove the exploded super ball
+        for (let j = balls.length - 1; j >= 0; j--) {
+          if (balls[j].exploding && 
+              Math.hypot(balls[j].x - explosion.x, balls[j].y - explosion.y) < 1) {
+            balls.splice(j, 1);
+            break;
+          }
+        }
+      }
+    }
 
     // Escape + respawn
     for (let i = balls.length - 1; i >= 0; i--) {
@@ -389,8 +502,11 @@ export default function App() {
     }
 
     // Draw balls
-    ctx.fillStyle = "#fff";
     for (const b of balls) {
+      // Skip exploding balls (they're hidden during explosion animation)
+      if (b.exploding) continue;
+      
+      ctx.fillStyle = b.color || "#fff";
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
       ctx.fill();
@@ -506,6 +622,19 @@ export default function App() {
             value={config.kickStrength}
             onChange={(e) => updateConfig("kickStrength", parseFloat(e.target.value))} />
           <span>{config.kickStrength.toFixed(1)}</span>
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          Enable super balls
+          <input type="checkbox"
+            checked={config.enableSuperBalls}
+            onChange={(e) => setConfig((c) => ({ ...c, enableSuperBalls: e.target.checked }))} />
+        </label>
+        <label>Shock wave strength
+          <input type="range" min={0} max={1000} step={50}
+            value={config.shockWaveStrength}
+            onChange={(e) => updateConfig("shockWaveStrength", parseFloat(e.target.value))}
+            disabled={!config.enableSuperBalls} />
+          <span>{config.shockWaveStrength}</span>
         </label>
       </fieldset>
 
