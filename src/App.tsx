@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from "react";
 
-type CircleConfig = { rotationSpeed: number; direction: 1 | -1 };
+type CircleConfig = { rotationSpeed: number; direction: 1 | -1; gapDegrees: number };
 
 type Config = {
   baseDiameter: number;
@@ -27,9 +27,9 @@ const defaultConfig: Config = {
   circleThickness: 10,
   kickStrength: 0.6,
   circles: [
-    { rotationSpeed: 1.2, direction: 1 },
-    { rotationSpeed: 0.8, direction: -1 },
-    { rotationSpeed: 1.5, direction: 1 },
+    { rotationSpeed: 1.2, direction: 1, gapDegrees: 40 },
+    { rotationSpeed: 0.8, direction: -1, gapDegrees: 40 },
+    { rotationSpeed: 1.5, direction: 1, gapDegrees: 40 },
   ],
 };
 
@@ -288,7 +288,6 @@ export default function App() {
     const size = canvasSize.current;
     const spacing = config.ballRadius * 5 * 2;
     const baseR = config.baseDiameter / 2;
-    const gapRad = (config.gapDegrees * Math.PI) / 180 / 2;
     const halfThickness = config.circleThickness / 2;
 
     ctx.clearRect(0, 0, size, size);
@@ -306,7 +305,8 @@ export default function App() {
       ctx.translate(cx, cy);
       ctx.rotate(rotRef.current[i]);
       ctx.beginPath();
-      ctx.arc(0, 0, R, gapRad, 2 * Math.PI - gapRad);
+      const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
+      ctx.arc(0, 0, R, circGapRad, 2 * Math.PI - circGapRad);
       ctx.lineWidth = config.circleThickness;
       ctx.strokeStyle = "#fff";
       ctx.stroke();
@@ -343,7 +343,7 @@ export default function App() {
       rings.forEach((ring, ringIndex) => {
         const circ = config.circles[ringIndex] || config.circles[0];
         const angularSpeed = rotationEnabled ? circ.rotationSpeed * circ.direction : 0;
-        const inGap = isInGap(b.x, b.y, ring.rot, config.gapDegrees);
+        const inGap = isInGap(b.x, b.y, ring.rot, circ.gapDegrees);
         if (!inGap) {
           const innerEdge = ring.inner - b.r;
           const outerEdge = ring.outer + b.r;
@@ -358,7 +358,7 @@ export default function App() {
           }
         } else {
           // Check for collision with gap edges
-          checkGapEdgeCollision(b, ring, config.gapDegrees, angularSpeed);
+          checkGapEdgeCollision(b, ring, circ.gapDegrees, angularSpeed);
         }
       });
     }
@@ -416,7 +416,7 @@ export default function App() {
       circleCount: c.circleCount + 1,
       circles: [
         ...c.circles,
-        { rotationSpeed: 1 + Math.random(), direction: Math.random() > 0.5 ? 1 : -1 },
+        { rotationSpeed: 1 + Math.random(), direction: Math.random() > 0.5 ? 1 : -1, gapDegrees: c.gapDegrees },
       ],
     }));
 
@@ -494,17 +494,32 @@ export default function App() {
         {Array.from({ length: config.circleCount }).map((_, i) => {
           const circ = config.circles[i] || config.circles[0];
           return (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-              <span>#{i + 1}</span>
-              <input type="range" min={0} max={3} step={0.1}
-                value={circ.rotationSpeed}
-                onChange={(e) => updateCircle(i, "rotationSpeed", parseFloat(e.target.value))} />
-              <select value={circ.direction}
-                onChange={(e) => updateCircle(i, "direction", parseInt(e.target.value))}>
-                <option value={1}>↻</option>
-                <option value={-1}>↺</option>
-              </select>
-              <span>{circ.rotationSpeed?.toFixed(1) || ''}</span>
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8, padding: 8, background: "#222", borderRadius: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 30 }}>#{i + 1}</span>
+                <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 4 }}>
+                  Speed:
+                  <input type="range" min={0} max={3} step={0.1} style={{ flex: 1 }}
+                    value={circ.rotationSpeed}
+                    onChange={(e) => updateCircle(i, "rotationSpeed", parseFloat(e.target.value))} />
+                  <span style={{ width: 30 }}>{circ.rotationSpeed?.toFixed(1) || ''}</span>
+                </label>
+                <select value={circ.direction}
+                  onChange={(e) => updateCircle(i, "direction", parseInt(e.target.value))}>
+                  <option value={1}>↻</option>
+                  <option value={-1}>↺</option>
+                </select>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 30 }}></span>
+                <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 4 }}>
+                  Gap:
+                  <input type="range" min={10} max={120} step={2} style={{ flex: 1 }}
+                    value={circ.gapDegrees}
+                    onChange={(e) => updateCircle(i, "gapDegrees", parseFloat(e.target.value))} />
+                  <span style={{ width: 30 }}>{circ.gapDegrees}°</span>
+                </label>
+              </div>
             </div>
           );
         })}
