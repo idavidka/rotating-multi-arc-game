@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from "react";
 
-type CircleConfig = { rotationSpeed: number; direction: 1 | -1; gapDegrees: number };
+type CircleConfig = { rotationSpeed: number; direction: 1 | -1; gapDegrees: number, angle: number };
 
 type Config = {
   baseDiameter: number;
@@ -14,6 +14,7 @@ type Config = {
   circleThickness: number;
   kickStrength: number;
   circles: CircleConfig[];
+  mode: '2D' | '3D';
 };
 
 const defaultConfig: Config = {
@@ -27,10 +28,11 @@ const defaultConfig: Config = {
   circleThickness: 10,
   kickStrength: 0.6,
   circles: [
-    { rotationSpeed: 1.2, direction: 1, gapDegrees: 40 },
-    { rotationSpeed: 0.8, direction: -1, gapDegrees: 40 },
-    { rotationSpeed: 1.5, direction: 1, gapDegrees: 40 },
+    { rotationSpeed: 1.2, direction: 1, gapDegrees: 40, angle: 60 },
+    { rotationSpeed: 0.8, direction: -1, gapDegrees: 40, angle: 60 },
+    { rotationSpeed: 1.5, direction: 1, gapDegrees: 40, angle: 60, },
   ],
+  mode: '2D',
 };
 
 export default function App() {
@@ -304,12 +306,31 @@ export default function App() {
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(rotRef.current[i]);
-      ctx.beginPath();
-      const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
-      ctx.arc(0, 0, R, circGapRad, 2 * Math.PI - circGapRad);
-      ctx.lineWidth = config.circleThickness;
-      ctx.strokeStyle = "#fff";
-      ctx.stroke();
+
+      if (config.mode === '2D') {
+        // Original 2D rendering
+        ctx.beginPath();
+        const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
+        ctx.arc(0, 0, R, circGapRad, 2 * Math.PI - circGapRad);
+        ctx.lineWidth = config.circleThickness;
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+      } else {
+        // 3D rendering: draw the circle as an ellipse based on the tilt angle
+        const tiltAngle = circ.angle;
+        const tiltRad = (tiltAngle * Math.PI) / 180;
+        const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
+
+        // Calculate ellipse parameters
+        const radiusY = R * Math.cos(tiltRad); // vertical radius scales with cos(angle)
+
+        ctx.beginPath();
+        ctx.ellipse(0, 0, R, radiusY, 0, circGapRad, 2 * Math.PI - circGapRad);
+        ctx.lineWidth = config.circleThickness;
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+      }
+
       ctx.restore();
     }
 
@@ -380,7 +401,23 @@ export default function App() {
     ctx.fillStyle = "#fff";
     for (const b of balls) {
       ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      if (config.mode === '2D') {
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+      } else {
+        // In 3D mode, calculate average tilt angle for ball rendering
+        let avgTiltAngle = 0;
+        rings.forEach((_, ringIndex) => {
+          const circ = config.circles[ringIndex] || config.circles[0];
+          avgTiltAngle += circ.angle;
+        });
+        avgTiltAngle /= rings.length;
+
+        const tiltRad = (avgTiltAngle * Math.PI) / 180;
+        const radiusY = b.r * Math.cos(tiltRad);
+
+        // Draw ball as ellipse in 3D mode
+        ctx.ellipse(b.x, b.y, b.r, radiusY, 0, 0, Math.PI * 2);
+      }
       ctx.fill();
     }
 
@@ -416,7 +453,7 @@ export default function App() {
       circleCount: c.circleCount + 1,
       circles: [
         ...c.circles,
-        { rotationSpeed: 1 + Math.random(), direction: Math.random() > 0.5 ? 1 : -1, gapDegrees: c.gapDegrees },
+        { rotationSpeed: 1 + Math.random(), direction: Math.random() > 0.5 ? 1 : -1, angle: 60, gapDegrees: c.gapDegrees },
       ],
     }));
 
@@ -433,6 +470,14 @@ export default function App() {
       <canvas ref={canvasRef} style={{ background: "#0a0f0a", maxWidth: "100%", maxHeight: "calc(100vh - 300px)", height: "auto", width: "auto", display: "block" }} />
 
       <fieldset style={{ display: "flex", flexDirection: "row", gap: 10, flexWrap: "wrap", background: "#111", color: "#ccc", padding: 10, borderRadius: 6, maxWidth: "100%", boxSizing: "border-box" }}>
+        <label>Mode
+          <select
+            value={config.mode}
+            onChange={(e) => setConfig((c) => ({ ...c, mode: e.target.value as '2D' | '3D' }))}>
+            <option value="2D">2D</option>
+            <option value="3D">3D</option>
+          </select>
+        </label>
         <label>Inner circle diameter
           <input type="range" min={200} max={800} step={10}
             value={config.baseDiameter}
@@ -494,40 +539,45 @@ export default function App() {
         {Array.from({ length: config.circleCount }).map((_, i) => {
           const circ = config.circles[i] || config.circles[0];
           return (
-            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8, padding: 8, background: "#222", borderRadius: 4 }}>
+            <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8, padding: 6, background: "#1a1a1a", borderRadius: 4 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 30 }}>#{i + 1}</span>
-                <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 4 }}>
-                  Speed:
-                  <input type="range" min={0} max={3} step={0.1} style={{ flex: 1 }}
-                    value={circ.rotationSpeed}
-                    onChange={(e) => updateCircle(i, "rotationSpeed", parseFloat(e.target.value))} />
-                  <span style={{ width: 30 }}>{circ.rotationSpeed?.toFixed(1) || ''}</span>
-                </label>
+                <span style={{ fontWeight: 600 }}>#{i + 1}</span>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>Speed:</span>
+                <input type="range" min={0} max={3} step={0.1}
+                  value={circ.rotationSpeed}
+                  onChange={(e) => updateCircle(i, "rotationSpeed", parseFloat(e.target.value))} />
                 <select value={circ.direction}
                   onChange={(e) => updateCircle(i, "direction", parseInt(e.target.value))}>
                   <option value={1}>↻</option>
                   <option value={-1}>↺</option>
                 </select>
+                <span>{circ.rotationSpeed?.toFixed(1) || ''}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ width: 30 }}></span>
-                <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 4 }}>
-                  Gap:
-                  <input type="range" min={10} max={120} step={2} style={{ flex: 1 }}
-                    value={circ.gapDegrees}
-                    onChange={(e) => updateCircle(i, "gapDegrees", parseFloat(e.target.value))} />
-                  <span style={{ width: 30 }}>{circ.gapDegrees}°</span>
-                </label>
+                <span style={{ fontSize: 12, opacity: 0.7 }}>Gap:</span>
+                <input type="range" min={10} max={120} step={2} style={{ flex: 1 }}
+                  value={circ.gapDegrees}
+                  onChange={(e) => updateCircle(i, "gapDegrees", parseFloat(e.target.value))} />
+                <span style={{ width: 30 }}>{circ.gapDegrees}°</span>
               </div>
-            </div>
+              {config.mode === '3D' && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>Angle:</span>
+                  <input type="range" min={0} max={90} step={5}
+                    value={circ.angle}
+                    onChange={(e) => updateCircle(i, "angle", parseFloat(e.target.value))}
+                    style={{ flex: 1 }} />
+                  <span>{circ.angle}°</span>
+                </div>
+              )}
+            </div >
           );
         })}
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           <button onClick={addCircle} style={{ flex: 1, background: "#2d2", border: "none", borderRadius: 6, padding: 6 }}>+ Add</button>
           <button onClick={removeCircle} style={{ flex: 1, background: "#c33", border: "none", borderRadius: 6, padding: 6, color: "#fff" }}>− Remove</button>
         </div>
-      </fieldset>
+      </fieldset >
 
 
       <div style={{ display: "flex", gap: 8 }}>
@@ -576,6 +626,6 @@ export default function App() {
 
       <div style={{ fontSize: 14, opacity: 0.8 }}>Canvas: {canvasSize.current}px</div>
       <div style={{ fontSize: 14, opacity: 0.8 }}>Balls: {ballsRef.current.length}</div>
-    </div>
+    </div >
   );
 }
