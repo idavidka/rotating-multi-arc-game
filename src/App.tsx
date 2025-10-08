@@ -47,9 +47,7 @@ const draw3DSphere = (
   const tiltRad = (tiltAngle * Math.PI) / 180;
   const gapRad = (gapAngle * Math.PI) / 180 / 2;
   
-  // Draw outer sphere surface with gradient for 3D effect
   const innerRadius = radius - thickness / 2;
-  const outerRadius = radius + thickness / 2;
   
   // Calculate vertical compression for 3D effect
   const verticalScale = Math.cos(tiltRad);
@@ -57,69 +55,146 @@ const draw3DSphere = (
   ctx.save();
   ctx.rotate(rotation);
   
-  // Draw the sphere in segments to create hole
-  const segments = 64;
-  const angleStep = (2 * Math.PI) / segments;
+  // Draw the sphere surface with filled segments for solid appearance
+  const latSegments = 20; // vertical segments
+  const lonSegments = 64; // horizontal segments
   
-  for (let i = 0; i < segments; i++) {
-    const angle = i * angleStep;
-    const nextAngle = (i + 1) * angleStep;
+  // Draw from back to front for proper layering
+  for (let lat = 0; lat < latSegments; lat++) {
+    const latAngle = (lat / latSegments) * Math.PI;
+    const nextLatAngle = ((lat + 1) / latSegments) * Math.PI;
     
-    // Check if this segment is in the gap (hole)
-    const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
-    const normalizedNextAngle = ((nextAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
-    
-    // Skip drawing if within the gap
-    if (Math.abs(normalizedAngle) <= gapRad || Math.abs(normalizedNextAngle) <= gapRad) {
-      continue;
+    for (let lon = 0; lon < lonSegments; lon++) {
+      const lonAngle = (lon / lonSegments) * 2 * Math.PI;
+      const nextLonAngle = ((lon + 1) / lonSegments) * 2 * Math.PI;
+      
+      // Check if this segment is in the gap (hole)
+      const normalizedLon = ((lonAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+      const normalizedNextLon = ((nextLonAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+      
+      if (Math.abs(normalizedLon) <= gapRad || Math.abs(normalizedNextLon) <= gapRad) {
+        continue;
+      }
+      
+      // Calculate sphere surface points (using spherical coordinates)
+      const r = radius;
+      
+      // For outer surface
+      const x1 = r * Math.sin(latAngle) * Math.cos(lonAngle);
+      const y1 = r * Math.sin(latAngle) * Math.sin(lonAngle) * verticalScale;
+      const z1 = r * Math.cos(latAngle);
+      
+      const x2 = r * Math.sin(latAngle) * Math.cos(nextLonAngle);
+      const y2 = r * Math.sin(latAngle) * Math.sin(nextLonAngle) * verticalScale;
+      
+      const x3 = r * Math.sin(nextLatAngle) * Math.cos(nextLonAngle);
+      const y3 = r * Math.sin(nextLatAngle) * Math.sin(nextLonAngle) * verticalScale;
+      const z3 = r * Math.cos(nextLatAngle);
+      
+      const x4 = r * Math.sin(nextLatAngle) * Math.cos(lonAngle);
+      const y4 = r * Math.sin(nextLatAngle) * Math.sin(lonAngle) * verticalScale;
+      
+      // Calculate lighting based on normal vector (pointing outward)
+      const normalLon = (lonAngle + nextLonAngle) / 2;
+      const normalLat = (latAngle + nextLatAngle) / 2;
+      
+      // Light source from top-front
+      const lightDirX = 0.3;
+      const lightDirY = -0.5;
+      const lightDirZ = -0.8;
+      
+      const normalX = Math.sin(normalLat) * Math.cos(normalLon);
+      const normalY = Math.sin(normalLat) * Math.sin(normalLon);
+      const normalZ = Math.cos(normalLat);
+      
+      const dotProduct = normalX * lightDirX + normalY * lightDirY + normalZ * lightDirZ;
+      const lightIntensity = Math.max(0.2, Math.min(1, (dotProduct + 1) / 2));
+      
+      // Determine if this segment is visible (front-facing)
+      const avgZ = (z1 + z3) / 2;
+      const visibility = avgZ < 0 ? 0.85 : 0.4; // Back vs front
+      
+      // Draw the quad as two triangles
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.lineTo(x3, y3);
+      ctx.lineTo(x4, y4);
+      ctx.closePath();
+      
+      const alpha = visibility * 0.7;
+      const brightness = Math.floor(200 + 55 * lightIntensity);
+      ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${alpha})`;
+      ctx.fill();
+      
+      // Add edge for definition
+      ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.3})`;
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
     }
-    
-    // Draw outer surface
-    ctx.beginPath();
-    const x1 = Math.cos(angle) * outerRadius;
-    const y1 = Math.sin(angle) * outerRadius * verticalScale;
-    const x2 = Math.cos(nextAngle) * outerRadius;
-    const y2 = Math.sin(nextAngle) * outerRadius * verticalScale;
-    
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    
-    // Calculate lighting based on angle (simple sphere shading)
-    const normalAngle = (angle + nextAngle) / 2;
-    const lightIntensity = Math.max(0.3, (Math.cos(normalAngle) * 0.5 + 0.5));
-    
-    ctx.strokeStyle = `rgba(255, 255, 255, ${0.6 * lightIntensity})`;
-    ctx.lineWidth = thickness;
-    ctx.stroke();
   }
   
-  // Draw inner surface (darker)
-  for (let i = 0; i < segments; i++) {
-    const angle = i * angleStep;
-    const nextAngle = (i + 1) * angleStep;
+  // Draw inner surface (darker and less visible)
+  for (let lat = 0; lat < latSegments; lat++) {
+    const latAngle = (lat / latSegments) * Math.PI;
+    const nextLatAngle = ((lat + 1) / latSegments) * Math.PI;
     
-    const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
-    const normalizedNextAngle = ((nextAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
-    
-    if (Math.abs(normalizedAngle) <= gapRad || Math.abs(normalizedNextAngle) <= gapRad) {
-      continue;
+    for (let lon = 0; lon < lonSegments; lon++) {
+      const lonAngle = (lon / lonSegments) * 2 * Math.PI;
+      const nextLonAngle = ((lon + 1) / lonSegments) * 2 * Math.PI;
+      
+      const normalizedLon = ((lonAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+      const normalizedNextLon = ((nextLonAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+      
+      if (Math.abs(normalizedLon) <= gapRad || Math.abs(normalizedNextLon) <= gapRad) {
+        continue;
+      }
+      
+      const r = innerRadius;
+      
+      const x1 = r * Math.sin(latAngle) * Math.cos(lonAngle);
+      const y1 = r * Math.sin(latAngle) * Math.sin(lonAngle) * verticalScale;
+      const z1 = r * Math.cos(latAngle);
+      
+      const x2 = r * Math.sin(latAngle) * Math.cos(nextLonAngle);
+      const y2 = r * Math.sin(latAngle) * Math.sin(nextLonAngle) * verticalScale;
+      
+      const x3 = r * Math.sin(nextLatAngle) * Math.cos(nextLonAngle);
+      const y3 = r * Math.sin(nextLatAngle) * Math.sin(nextLonAngle) * verticalScale;
+      
+      const x4 = r * Math.sin(nextLatAngle) * Math.cos(lonAngle);
+      const y4 = r * Math.sin(nextLatAngle) * Math.sin(lonAngle) * verticalScale;
+      
+      // Inner surface lighting (inverted normals)
+      const normalLon = (lonAngle + nextLonAngle) / 2;
+      const normalLat = (latAngle + nextLatAngle) / 2;
+      
+      const normalX = -Math.sin(normalLat) * Math.cos(normalLon);
+      const normalY = -Math.sin(normalLat) * Math.sin(normalLon);
+      const normalZ = -Math.cos(normalLat);
+      
+      const lightDirX = 0.3;
+      const lightDirY = -0.5;
+      const lightDirZ = -0.8;
+      
+      const dotProduct = normalX * lightDirX + normalY * lightDirY + normalZ * lightDirZ;
+      const lightIntensity = Math.max(0.1, Math.min(0.6, (dotProduct + 1) / 2));
+      
+      const avgZ = (z1) / 1;
+      const visibility = avgZ > 0 ? 0.5 : 0.15; // Show inner surface when visible
+      
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.lineTo(x3, y3);
+      ctx.lineTo(x4, y4);
+      ctx.closePath();
+      
+      const alpha = visibility * 0.6;
+      const brightness = Math.floor(120 + 80 * lightIntensity);
+      ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, ${alpha})`;
+      ctx.fill();
     }
-    
-    ctx.beginPath();
-    const x1 = Math.cos(angle) * innerRadius;
-    const y1 = Math.sin(angle) * innerRadius * verticalScale;
-    const x2 = Math.cos(nextAngle) * innerRadius;
-    const y2 = Math.sin(nextAngle) * innerRadius * verticalScale;
-    
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    
-    const normalAngle = (angle + nextAngle) / 2;
-    const lightIntensity = Math.max(0.2, (Math.cos(normalAngle + Math.PI) * 0.3 + 0.4));
-    
-    ctx.strokeStyle = `rgba(255, 255, 255, ${0.4 * lightIntensity})`;
-    ctx.lineWidth = thickness * 0.3;
-    ctx.stroke();
   }
   
   ctx.restore();
