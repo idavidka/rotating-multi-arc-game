@@ -35,6 +35,96 @@ const defaultConfig: Config = {
   mode: '2D',
 };
 
+// Helper function to draw a 3D sphere with a hole
+const draw3DSphere = (
+  ctx: CanvasRenderingContext2D,
+  radius: number,
+  thickness: number,
+  tiltAngle: number,
+  gapAngle: number,
+  rotation: number
+) => {
+  const tiltRad = (tiltAngle * Math.PI) / 180;
+  const gapRad = (gapAngle * Math.PI) / 180 / 2;
+  
+  // Draw outer sphere surface with gradient for 3D effect
+  const innerRadius = radius - thickness / 2;
+  const outerRadius = radius + thickness / 2;
+  
+  // Calculate vertical compression for 3D effect
+  const verticalScale = Math.cos(tiltRad);
+  
+  ctx.save();
+  ctx.rotate(rotation);
+  
+  // Draw the sphere in segments to create hole
+  const segments = 64;
+  const angleStep = (2 * Math.PI) / segments;
+  
+  for (let i = 0; i < segments; i++) {
+    const angle = i * angleStep;
+    const nextAngle = (i + 1) * angleStep;
+    
+    // Check if this segment is in the gap (hole)
+    const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    const normalizedNextAngle = ((nextAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    
+    // Skip drawing if within the gap
+    if (Math.abs(normalizedAngle) <= gapRad || Math.abs(normalizedNextAngle) <= gapRad) {
+      continue;
+    }
+    
+    // Draw outer surface
+    ctx.beginPath();
+    const x1 = Math.cos(angle) * outerRadius;
+    const y1 = Math.sin(angle) * outerRadius * verticalScale;
+    const x2 = Math.cos(nextAngle) * outerRadius;
+    const y2 = Math.sin(nextAngle) * outerRadius * verticalScale;
+    
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    
+    // Calculate lighting based on angle (simple sphere shading)
+    const normalAngle = (angle + nextAngle) / 2;
+    const lightIntensity = Math.max(0.3, (Math.cos(normalAngle) * 0.5 + 0.5));
+    
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.6 * lightIntensity})`;
+    ctx.lineWidth = thickness;
+    ctx.stroke();
+  }
+  
+  // Draw inner surface (darker)
+  for (let i = 0; i < segments; i++) {
+    const angle = i * angleStep;
+    const nextAngle = (i + 1) * angleStep;
+    
+    const normalizedAngle = ((angle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    const normalizedNextAngle = ((nextAngle + Math.PI) % (2 * Math.PI)) - Math.PI;
+    
+    if (Math.abs(normalizedAngle) <= gapRad || Math.abs(normalizedNextAngle) <= gapRad) {
+      continue;
+    }
+    
+    ctx.beginPath();
+    const x1 = Math.cos(angle) * innerRadius;
+    const y1 = Math.sin(angle) * innerRadius * verticalScale;
+    const x2 = Math.cos(nextAngle) * innerRadius;
+    const y2 = Math.sin(nextAngle) * innerRadius * verticalScale;
+    
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    
+    const normalAngle = (angle + nextAngle) / 2;
+    const lightIntensity = Math.max(0.2, (Math.cos(normalAngle + Math.PI) * 0.3 + 0.4));
+    
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.4 * lightIntensity})`;
+    ctx.lineWidth = thickness * 0.3;
+    ctx.stroke();
+  }
+  
+  ctx.restore();
+};
+
 export default function App() {
   const [config, setConfig] = useState(defaultConfig);
   const [running, setRunning] = useState(true);
@@ -305,10 +395,10 @@ export default function App() {
 
       ctx.save();
       ctx.translate(cx, cy);
-      ctx.rotate(rotRef.current[i]);
-
+      
       if (config.mode === '2D') {
         // Original 2D rendering
+        ctx.rotate(rotRef.current[i]);
         ctx.beginPath();
         const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
         ctx.arc(0, 0, R, circGapRad, 2 * Math.PI - circGapRad);
@@ -316,21 +406,17 @@ export default function App() {
         ctx.strokeStyle = "#fff";
         ctx.stroke();
       } else {
-        // 3D rendering: draw the circle as an ellipse based on the tilt angle
-        const tiltAngle = circ.angle;
-        const tiltRad = (tiltAngle * Math.PI) / 180;
-        const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
-
-        // Calculate ellipse parameters
-        const radiusY = R * Math.cos(tiltRad); // vertical radius scales with cos(angle)
-
-        ctx.beginPath();
-        ctx.ellipse(0, 0, R, radiusY, 0, circGapRad, 2 * Math.PI - circGapRad);
-        ctx.lineWidth = config.circleThickness;
-        ctx.strokeStyle = "#fff";
-        ctx.stroke();
+        // 3D rendering: draw actual 3D sphere with hole
+        draw3DSphere(
+          ctx,
+          R,
+          config.circleThickness,
+          circ.angle,
+          circ.gapDegrees,
+          rotRef.current[i]
+        );
       }
-
+      
       ctx.restore();
     }
 
@@ -398,13 +484,14 @@ export default function App() {
     }
 
     // Draw balls
-    ctx.fillStyle = "#fff";
     for (const b of balls) {
       ctx.beginPath();
       if (config.mode === '2D') {
+        ctx.fillStyle = "#fff";
         ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
       } else {
-        // In 3D mode, calculate average tilt angle for ball rendering
+        // In 3D mode, draw balls with gradient for 3D sphere effect
         let avgTiltAngle = 0;
         rings.forEach((_, ringIndex) => {
           const circ = config.circles[ringIndex] || config.circles[0];
@@ -413,12 +500,33 @@ export default function App() {
         avgTiltAngle /= rings.length;
 
         const tiltRad = (avgTiltAngle * Math.PI) / 180;
-        const radiusY = b.r * Math.cos(tiltRad);
-
-        // Draw ball as ellipse in 3D mode
-        ctx.ellipse(b.x, b.y, b.r, radiusY, 0, 0, Math.PI * 2);
+        const verticalScale = Math.cos(tiltRad);
+        
+        // Draw ball with radial gradient for 3D effect
+        const gradient = ctx.createRadialGradient(
+          b.x - b.r * 0.3, 
+          b.y - b.r * 0.3 * verticalScale, 
+          b.r * 0.1,
+          b.x, 
+          b.y, 
+          b.r
+        );
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        gradient.addColorStop(0.7, 'rgba(220, 220, 220, 0.9)');
+        gradient.addColorStop(1, 'rgba(180, 180, 180, 0.8)');
+        
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        ctx.scale(1, verticalScale);
+        ctx.translate(-b.x, -b.y);
+        
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.restore();
       }
-      ctx.fill();
     }
 
     animRef.current = requestAnimationFrame(loop);
