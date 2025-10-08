@@ -384,6 +384,20 @@ export default function App() {
       ctx.fill();
     }
 
+    // Draw ball count text on canvas
+    ctx.font = "16px system-ui, sans-serif";
+    ctx.fillStyle = "#fff";
+    
+    // Top-left: existing ball count
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(`Balls: ${balls.length}`, 10, 10);
+    
+    // Top-right: all ball count (initial balls target)
+    ctx.textAlign = "right";
+    ctx.textBaseline = "top";
+    ctx.fillText(`All: ${config.initialBalls}`, size - 10, 10);
+
     animRef.current = requestAnimationFrame(loop);
   };
 
