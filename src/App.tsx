@@ -1,13 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useRef, useState } from "react";
 
-type CircleConfig = { rotationSpeed: number; direction: 1 | -1; gapDegrees: number };
+type CircleConfig = { rotationSpeed: number; direction: 1 | -1; gapDegrees: number, hidden?: boolean };
 
 type Config = {
   baseDiameter: number;
   initialBalls: number;
   circleCount: number;
-  gapDegrees: number;
   ballsOnEscape: number;
   ballRadius: number;
   ballSpeed: number;
@@ -20,16 +19,24 @@ const defaultConfig: Config = {
   baseDiameter: 400,
   initialBalls: 2,
   circleCount: 3,
-  gapDegrees: 40,
   ballsOnEscape: 2,
   ballRadius: 6,
   ballSpeed: 250,
   circleThickness: 10,
   kickStrength: 0.6,
   circles: [
-    { rotationSpeed: 1.2, direction: 1, gapDegrees: 40 },
-    { rotationSpeed: 0.8, direction: -1, gapDegrees: 40 },
-    { rotationSpeed: 1.5, direction: 1, gapDegrees: 40 },
+    {
+      rotationSpeed: 1.2, direction: 1, gapDegrees: 40,
+      hidden: false,
+    },
+    {
+      rotationSpeed: 0.8, direction: -1, gapDegrees: 40,
+      hidden: false,
+    },
+    {
+      rotationSpeed: 1.5, direction: 1, gapDegrees: 40,
+      hidden: false,
+    },
   ],
 };
 
@@ -299,20 +306,22 @@ export default function App() {
 
     for (let i = 0; i < config.circleCount; i++) {
       const circ = config.circles[i] || config.circles[0];
-      if (rotationEnabled) rotRef.current[i] += circ.rotationSpeed * circ.direction * dt;
-      const R = baseR + i * spacing;
-      rings.push({ inner: R - halfThickness, outer: R + halfThickness, rot: rotRef.current[i] });
+      if (!circ.hidden) {
+        if (rotationEnabled) rotRef.current[i] += circ.rotationSpeed * circ.direction * dt;
+        const R = baseR + i * spacing;
+        rings.push({ inner: R - halfThickness, outer: R + halfThickness, rot: rotRef.current[i] });
 
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(rotRef.current[i]);
-      ctx.beginPath();
-      const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
-      ctx.arc(0, 0, R, circGapRad, 2 * Math.PI - circGapRad);
-      ctx.lineWidth = config.circleThickness;
-      ctx.strokeStyle = "#fff";
-      ctx.stroke();
-      ctx.restore();
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rotRef.current[i]);
+        ctx.beginPath();
+        const circGapRad = (circ.gapDegrees * Math.PI) / 180 / 2;
+        ctx.arc(0, 0, R, circGapRad, 2 * Math.PI - circGapRad);
+        ctx.lineWidth = config.circleThickness;
+        ctx.strokeStyle = "#fff";
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
     const balls = ballsRef.current;
@@ -390,12 +399,12 @@ export default function App() {
     // Draw ball count text on canvas
     ctx.font = "16px system-ui, sans-serif";
     ctx.fillStyle = "#fff";
-    
+
     // Top-left: existing ball count
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillText(`Balls: ${balls.length}`, 10, 10);
-    
+
     // Top-right: all ball count (total balls created since restart)
     ctx.textAlign = "right";
     ctx.textBaseline = "top";
@@ -418,7 +427,7 @@ export default function App() {
   const updateConfig = (key: keyof Config, val: number) =>
     setConfig((c) => ({ ...c, [key]: val }));
 
-  const updateCircle = (index: number, key: keyof CircleConfig, val: number) => {
+  const updateCircle = <T extends keyof CircleConfig>(index: number, key: T, val: CircleConfig[T]) => {
     setConfig((c) => {
       const circles = [...c.circles];
       circles[index] = { ...circles[index], [key]: val };
@@ -433,7 +442,7 @@ export default function App() {
       circleCount: c.circleCount + 1,
       circles: [
         ...c.circles,
-        { rotationSpeed: 1 + Math.random(), direction: Math.random() > 0.5 ? 1 : -1, gapDegrees: c.gapDegrees },
+        { rotationSpeed: 1 + Math.random(), direction: Math.random() > 0.5 ? 1 : -1, gapDegrees: c.circles[c.circles.length - 1]?.gapDegrees || 40, hidden: false },
       ],
     }));
 
@@ -468,12 +477,6 @@ export default function App() {
             onChange={(e) => updateConfig("circleCount", parseInt(e.target.value))} />
           <span>{config.circleCount}</span>
         </label>
-        {/* <label>Gap (°)
-          <input type="range" min={10} max={120} step={2}
-            value={config.gapDegrees}
-            onChange={(e) => updateConfig("gapDegrees", parseFloat(e.target.value))} />
-          <span>{config.gapDegrees}</span>
-        </label> */}
         <label>Balls on escape
           <input type="range" min={0} max={5} step={1}
             value={config.ballsOnEscape}
@@ -522,7 +525,7 @@ export default function App() {
                   <span style={{ width: 30 }}>{circ.rotationSpeed?.toFixed(1) || ''}</span>
                 </label>
                 <select value={circ.direction}
-                  onChange={(e) => updateCircle(i, "direction", parseInt(e.target.value))}>
+                  onChange={(e) => updateCircle(i, "direction", parseInt(e.target.value) as 1 | -1)}>
                   <option value={1}>↻</option>
                   <option value={-1}>↺</option>
                 </select>
@@ -535,6 +538,16 @@ export default function App() {
                     value={circ.gapDegrees}
                     onChange={(e) => updateCircle(i, "gapDegrees", parseFloat(e.target.value))} />
                   <span style={{ width: 30 }}>{circ.gapDegrees}°</span>
+                </label>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 30 }}></span>
+                <label style={{ flex: 1, display: "flex", alignItems: "center", gap: 4 }}>
+                  Hidden:
+                  <input type="checkbox" style={{ flex: 1 }}
+                    checked={!!circ.hidden}
+                    onChange={(e) => updateCircle(i, "hidden", e.target.checked)} />
+                  <span style={{ width: 30 }}>{circ.hidden ? "Yes" : "No"}</span>
                 </label>
               </div>
             </div>
