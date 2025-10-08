@@ -407,7 +407,7 @@ export default function App() {
                 <option value={1}>↻</option>
                 <option value={-1}>↺</option>
               </select>
-              <span>{circ.rotationSpeed.toFixed(1)}</span>
+              <span>{circ.rotationSpeed?.toFixed(1) || ''}</span>
             </div>
           );
         })}
